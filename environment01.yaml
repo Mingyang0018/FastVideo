@@ -1,0 +1,29 @@
+name: multitalk
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+  - nvidia
+  - huggingface
+  - anaconda
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - misaki[en]
+    - ninja 
+    - psutil 
+    - packaging 
+    - tokenizers
+    - tqdm
+    - imageio
+    - easydict
+    - ftfy
+    - dashscope
+    - imageio-ffmpeg
+    - scikit-image   
+    - loguru
+    - gradio
+    - xfuser
+    - pyloudnorm
+    - optimum-quanto

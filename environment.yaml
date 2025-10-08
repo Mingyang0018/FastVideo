@@ -1,0 +1,36 @@
+name: fast_video
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+  - nvidia
+  - huggingface
+  - anaconda
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - openai
+      - numpy
+      - pandas
+      - matplotlib
+      - edge-tts
+      - diffusers
+      - ipython
+      - deep-translator
+      - git+https://github.com/openai/CLIP.git
+      - jupyter
+      - uvicorn
+      - rembg
+      - fastapi
+      - huggingface-hub
+      - ultralytics
+      - moviepy
+      - opencv-python
+      - python-dotenv
+      - onnxruntime
+      - typing
+      - accelerate
+      - transformers
+      - sentencepiece
+      - streamlit
