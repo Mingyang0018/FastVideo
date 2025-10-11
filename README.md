@@ -2,6 +2,19 @@
 
 本项目支持自动化生成短剧视频，实现从主题到多角色交互的短剧视频的全流程自动化，包含生成剧本、合成语音、生成角色、生成视频、合成短剧。
 
+![img](https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/Screenshot.png)
+
+## 短剧示例
+
+<table border="0" style="width: 100%; text-align: left; margin-top: 20px;">
+  <tr>
+      <td>
+          <video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430.mp4" width="450" controls loop>		  </video>
+      </td>
+      <td>
+          <video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251006202718.mp4" width="450" controls loop></video>
+      </td>
+
 ## 环境安装
 
 1. 安装 Miniconda 或 Anaconda

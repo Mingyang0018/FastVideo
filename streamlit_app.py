@@ -10,7 +10,6 @@ st.set_page_config(page_title="FastVideo", layout="wide")
 # ---------------------------
 # 左侧边栏：配置参数（只是收集输入，还没实例化 BaseInfo）
 # ---------------------------
-
 dict_zh_en = {
     "中国古代": "Chinese ancient",
     "中国现代": "Chinese modern",
@@ -21,13 +20,34 @@ dict_zh_en = {
 }
 with st.sidebar:
     st.header("配置参数")
+    model_vendor = st.selectbox(
+        "大模型厂商",
+        options=["DeepSeek"],
+        index=0,
+        help="选择用于生成剧本和提示词的大语言模型"
+    )
     api_key = st.text_input("API Key", value='', type="password")
-    hf_token = st.text_input("HF_TOKEN", value='', type="password")
+    # 根据model_vendor选择model_id，DeepSeek: [deepseek-chat, deepseek-reasoner]
+    dict_model_id = {
+        'DeepSeek': ['deepseek-chat','deepseek-reasoner']
+    }
+    model_id = 'deepseek-chat'
+    if model_vendor:
+        model_id = st.selectbox(
+            "模型", dict_model_id[model_vendor]
+        )
     language = st.selectbox("语言", ["中文", "English"])
     culture_background_zh = st.selectbox("文化背景", ["中国古代","中国现代","西方古代","西方现代"], index=0)
     culture_background = dict_zh_en.get(culture_background_zh, "Chinese ancient")
     drama_style_zh = st.selectbox("短剧风格", ["动画效果", "真人效果"], index=0)
     drama_style = dict_zh_en.get(drama_style_zh, "Animated movie")
+    # --- 新增：关键词多选 ---
+    keywords = st.multiselect(
+        "关键词",
+        options=["喜剧", "悬疑", "科幻", "爱情", "动作", "奇幻", "剧情", "励志", "恐怖"],
+        default=["喜剧"],
+        help="可选择多个关键词来指定短剧风格方向"
+    )
 
     resolution = st.selectbox("分辨率", [(720, 1280), (1280, 720), (1080, 1080), (512, 512)], index=0)
     width, height = resolution
@@ -78,7 +98,7 @@ def check_and_init(force_refresh=True, load_data=True, allow_partial_load=False)
     load_data: 是否加载已有 drama_data.json
     allow_partial_load: 是否允许在未填写完整参数时，仅加载已有文件
     """
-    if not api_key or not hf_token or not theme:
+    if not api_key or not theme:
         if allow_partial_load:
             # 只加载已有 drama_data.json
             if "drama_data" in st.session_state:
@@ -92,7 +112,7 @@ def check_and_init(force_refresh=True, load_data=True, allow_partial_load=False)
                     drama_data = None
             return None, drama_data, None
         else:
-            st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+            st.warning("请填写完整配置参数（API Key、主题）")
             return None, None, None
 
     # 如果已经存在则直接返回
@@ -105,10 +125,11 @@ def check_and_init(force_refresh=True, load_data=True, allow_partial_load=False)
     # 初始化
     base_info = BaseInfo(
         api_key=api_key,
-        HF_TOKEN=hf_token,
+        model_id=model_id,
         language=language,
         culture_background=culture_background,
         drama_style=drama_style,
+        keywords=keywords,
         width=width,
         height=height,
         text2image_model=text2image_model,
@@ -206,7 +227,6 @@ def get_results():
             save_file = os.path.abspath(os.path.join(drama_data.base_info.OUTPUT_DIR, f"{chatID}.mp4"))
             results['videos'].append(save_file)
     return results
-
 path_output = get_results()
 # ---------------------------
 # 通用删除确认函数
@@ -224,7 +244,6 @@ def confirm_delete(item_name, session_state_key=None, extra_remove_keys=None):
     placeholder = st.empty()
     with placeholder.container():
         st.warning(f"是否删除全部{item_name}？")
-        # st.write("待删除文件：", file_list)
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✅ 是", key=f"confirm_del_{item_name}"):
@@ -241,12 +260,10 @@ def confirm_delete(item_name, session_state_key=None, extra_remove_keys=None):
         for f in file_list:
             if isinstance(f, dict):  # 如果传入的是 dict 列表（如角色）
                 f_path = f.get('path')
-                # st.write(f_path)
                 if f_path and os.path.exists(f_path):
                     os.remove(f_path)
                     deleted.append(f_path)
             elif os.path.exists(f):
-                # st.write(f)
                 os.remove(f)
                 deleted.append(f)
         if session_state_key:
@@ -260,7 +277,6 @@ def confirm_delete(item_name, session_state_key=None, extra_remove_keys=None):
         else:
             st.warning(f"没有找到可删除的 {item_name} 文件")
         time.sleep(1)
-        # placeholder.empty()
         st.rerun()
 # ---------------------------
 # 删除工具函数
@@ -282,25 +298,12 @@ base_info, drama_data, drama_pipeline = check_and_init(force_refresh=False, load
 # 一键生成短剧
 def generate_drama_all(drama_pipeline, skip_if_exists=False):
     show_log()
-    # st.write("生成剧本...")
     drama_pipeline.generate_script_and_shot(skip_if_exists=skip_if_exists)
-
-    # st.write("生成语音...")
     drama_pipeline.generate_voices_sync(skip_if_exists=skip_if_exists)
-
-    # st.write("生成角色...")
     drama_pipeline.generate_roles(skip_if_exists=skip_if_exists)
-
-    # st.write("生成场景...")
     drama_pipeline.generate_scenes(skip_if_exists=skip_if_exists)
-
-    # st.write("生成视频...")
     drama_pipeline.generate_videos(skip_if_exists=skip_if_exists)
-
-    # st.write("拼接视频...")
     drama_pipeline.concatenate_videos()
-
-    # st.success("✅ 视频已生成！")
     if drama_pipeline.output_video_path:
         st.subheader("最终结果")
         st.video(drama_pipeline.output_video_path)
@@ -315,8 +318,8 @@ def generate_drama_all(drama_pipeline, skip_if_exists=False):
 # ---------------------------
 # 一键生成
 if one_click:
-    if not api_key or not hf_token or not theme:
-        st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+    if not api_key or not theme:
+        st.warning("请填写完整配置参数（API Key、主题）")
     else:
         st.session_state["confirm_action"] = "generate_all"
 if st.session_state["confirm_action"] == "generate_all":
@@ -343,7 +346,6 @@ if st.session_state["confirm_action"] == "confirm_generate_all_overwrite":
     if drama_pipeline is not None:
         generate_drama_all(drama_pipeline=drama_pipeline, skip_if_exists=skip_if_exists)
         
-
 if st.session_state["confirm_action"] == "confirm_generate_all_skip":
     st.session_state["confirm_action"] = None
     placeholder.empty()
@@ -364,8 +366,8 @@ with col1:
     del1_button  = st.button("删除剧本", type="secondary", key="del_script")
 
     if step1_button:
-        if not api_key or not hf_token or not theme:
-            st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+        if not api_key or not theme:
+            st.warning("请填写完整配置参数（API Key、主题）")
         else:
             # _, _, drama_pipeline = check_and_init(force_refresh=False, load_data=True)
             if drama_pipeline:
@@ -393,8 +395,8 @@ with col2:
     del2_button  = st.button("删除角色", type="secondary", key="del_roles")
 
     if step2_button:
-        if not api_key or not hf_token or not theme:
-            st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+        if not api_key or not theme:
+            st.warning("请填写完整配置参数（API Key、主题）")
         else:
             # _, _, drama_pipeline = check_and_init()
             if drama_pipeline:
@@ -475,8 +477,8 @@ with col3:
     del3_button  = st.button("删除场景", type="secondary", key="del_scenes")
 
     if step3_button:
-        if not api_key or not hf_token or not theme:
-            st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+        if not api_key or not theme:
+            st.warning("请填写完整配置参数（API Key、主题）")
         else:
             # _, _, drama_pipeline = check_and_init()
             if drama_pipeline:
@@ -550,8 +552,8 @@ with col4:
     del4_button  = st.button("删除视频", type="secondary", key="del_videos")
 
     if step4_button:
-        if not api_key or not hf_token or not theme:
-            st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+        if not api_key or not theme:
+            st.warning("请填写完整配置参数（API Key、主题）")
         else:
             if drama_pipeline:
                 show_log()
@@ -605,9 +607,9 @@ with col4:
                     except Exception as e:
                         st.error(f"上传失败: {e}")
 
-# --- Step 5: 拼接视频 ---
+# --- Step 5: 合成短剧 ---
 with col5:
-    step5_button = st.button("拼接视频", type="primary", key="btn_drama")
+    step5_button = st.button("合成短剧", type="primary", key="btn_drama")
     # del5_button  = st.button("删除短剧", type="secondary", key="del_videos")
     if drama_pipeline:
         if "drama_title" not in st.session_state:
@@ -620,8 +622,8 @@ with col5:
             drama_pipeline.data.save_json()
 
     if step5_button:
-        if not api_key or not hf_token or not theme:
-            st.warning("请填写完整配置参数（API Key、HF_TOKEN、主题）")
+        if not api_key or not theme:
+            st.warning("请填写完整配置参数（API Key、主题）")
         else:
             if drama_pipeline:
                 show_log()

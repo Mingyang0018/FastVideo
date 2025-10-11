@@ -53,7 +53,7 @@ def load_model(req: ModelRequest):
             print("ℹ️ 检测到 1 个 GPU，使用单卡（cuda:0）")
             pipe = DiffusionPipeline.from_pretrained(
                 req.model_id,
-                torch_dtype=torch.float16,
+                # torch_dtype=torch.float16,
                 device_map="balanced",
                 local_files_only=True,
             )

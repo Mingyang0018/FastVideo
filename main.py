@@ -55,8 +55,9 @@ class StreamlitLogger:
 @dataclass
 class BaseInfo:
     api_key: str = "xx"
-    HF_TOKEN: str = "xx"
+    # HF_TOKEN: str = "xx"
     model_id: str = "deepseek-chat"
+    keywords: str = "喜剧"
     # 基本信息
     theme: str = "默认主题"
     time_limit: int = 300
@@ -91,11 +92,11 @@ class BaseInfo:
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         torch.backends.cudnn.benchmark = True
-        if self.HF_TOKEN:
-            os.environ["HF_TOKEN"] = self.HF_TOKEN
+        # if self.HF_TOKEN:
+        #     os.environ["HF_TOKEN"] = self.HF_TOKEN
         # 可选：检查 api_key / HF_TOKEN 是否有效
-        if not self.api_key or not self.HF_TOKEN:
-            print("警告: api_key 或 HF_TOKEN 为空, 请在实例化 BaseInfo 时传入。")
+        if not self.api_key:
+            print("警告: api_key 为空, 请在实例化 BaseInfo 时传入。")
         # 代理
         if self.use_proxy:
             proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
@@ -233,7 +234,7 @@ class DramaPipeline:
     请为以下短剧剧本评分, 满分1.0。
     评分维度：
     1. 逻辑性（剧情合理）
-    2. 趣味性（充满笑点、对白幽默、动作夸张、悬念/反转）
+    2. 搞笑幽默性（充满笑点、对白幽默、动作夸张、悬念/反转）
     3. 完整性（剧情丰富+多场景+对话+动作+风景转场, 避免单一）
     4. 风格契合度（与指定风格贴合）
     5. 创新性（新颖, 不落俗套）
@@ -243,21 +244,22 @@ class DramaPipeline:
     {script_text}
 
     输出 JSON, 例如：
-    {{"逻辑性":0.62,"趣味性":0.7,"完整性":0.7,"风格契合度":0.85,"创新性":0.75}}
+    {{"逻辑性":0.62,"搞笑幽默性":0.7,"完整性":0.7,"风格契合度":0.85,"创新性":0.75}}
     只返回JSON结构本身, 不需要额外解释。
     """
         scores = self.generate_response([{"role":"user","content":prompt}])
         print(scores)
         try:
             # 综合评分权重, 可自定义
-            total_score = (
-                0.30*scores.get("趣味性",0) +
-                0.20*scores.get("完整性",0) +
-                0.15*scores.get("人物多样性",0) +
-                0.15*scores.get("逻辑性",0) +
-                0.1*scores.get("创新性",0) +
-                0.1*scores.get("风格契合度",0)
-            )
+            weights = {
+                "逻辑性": 2,
+                "搞笑幽默性": 2,
+                "完整性": 1,
+                "风格契合度": 1,
+                "创新性": 1,
+                "人物多样性": 1
+            }
+            total_score = sum(scores.get(w,0)*weights.get(w,0) for w in weights)/sum(weights.values())
             print(total_score)
             return total_score
         except:
@@ -275,7 +277,7 @@ class DramaPipeline:
                 {"role": "user", 
                     "content": 
                     f'''
-    请根据以下主题：{self.data.base_info.theme}, 短剧风格为：{self.data.base_info.drama_style}, 文化背景为：{self.data.base_info.culture_background}, 编写一个约{self.data.base_info.time_limit}分钟的完整的短剧剧本。
+    请根据以下主题：{self.data.base_info.theme}, 短剧风格为：{self.data.base_info.drama_style}, 文化背景为：{self.data.base_info.culture_background}, 短剧关键词为：{self.data.base_info.keywords}，编写一个约{self.data.base_info.time_limit}分钟的完整的短剧剧本。
     并按场景分镜输出, 每个场景应包含角色对话、角色动作和风景转场描述。确保剧本幽默风趣、吸人眼球、剧情丰富, 用于生成爆火的短剧视频。
     要求：
     1. 按场景分镜, 每个场景有对话、动作和风景转场。
@@ -298,7 +300,7 @@ class DramaPipeline:
         for script in top_scripts:
             prompt = f"""
     请根据以下原剧本提出改进建议并生成新的剧本：
-    - 增加趣味性和吸引力
+    - 增加搞笑幽默性和吸引力
     - 增加剧情和人物多样性
     - 修正逻辑漏洞
     - 增加场景完整性
@@ -318,7 +320,7 @@ class DramaPipeline:
         完整的迭代生成+评分+改写流程
         """
         MAX_ITER = 1       # 最大迭代轮数
-        INIT_CANDIDATES = 4  # 初始候选数量
+        INIT_CANDIDATES = 5  # 初始候选数量
         TOP_K = 2          # 每轮选取 top K
         STOP_SCORE = 0.9  # 停止阈值
         # ---- 1. 初代生成 ----
