@@ -30,15 +30,6 @@ graph LR;
         F
     end
 
-    style A fill:#fff5cc,stroke:#ffcc00,stroke-width:2px
-    style B fill:#e0f7fa,stroke:#00acc1,stroke-width:2px
-    style C fill:#e0f7fa,stroke:#00acc1,stroke-width:2px
-    style D fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
-    style E fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
-    style F fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
-    style G fill:#dcedc8,stroke:#558b2f,stroke-width:2px
-    style H fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
-
 ```
 
 ## 短剧示例
