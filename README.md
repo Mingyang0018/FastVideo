@@ -4,16 +4,55 @@
 
 ![img](https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/Screenshot.png)
 
+## 算法框架
+
+```mermaid
+graph LR;
+    A[主题输入] --> B[DeepSeek / ChatGPT 生成初版剧本];
+    B --> C[迭代优化剧本];
+    C --> C1[生成语音];
+    C1 --> D[text2image 生成角色与背景];
+    D --> E[image2image 生成分镜角色与背景];
+    E --> F[image2video 生成视频片段];
+    F --> G[拼接视频];
+    G --> H[合成短剧视频];
+
+    %% 辅助分支说明
+    subgraph DeepSeek / ChatGPT
+        B
+        C
+	C1
+    end
+
+    subgraph Diffusion
+        D
+        E
+        F
+    end
+
+    style A fill:#fff5cc,stroke:#ffcc00,stroke-width:2px
+    style B fill:#e0f7fa,stroke:#00acc1,stroke-width:2px
+    style C fill:#e0f7fa,stroke:#00acc1,stroke-width:2px
+    style D fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
+    style E fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
+    style F fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
+    style G fill:#dcedc8,stroke:#558b2f,stroke-width:2px
+    style H fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
+
+```
+
 ## 短剧示例
 
-<table border="0" style="width: 100%; text-align: left; margin-top: 20px;">
-  <tr>
-      <td>
-          <video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430.mp4" width="450" controls loop>		  </video>
-      </td>
-      <td>
-          <video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251006202718.mp4" width="450" controls loop></video>
-      </td>
+<div align="center">
+    <video width="40%" controls>
+        <source src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    <video width="40%" controls>
+        <source src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251006202718.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+</div>
 
 ## 环境安装
 
@@ -75,4 +114,13 @@ streamlit run streamlit_app.py
 # 参考
 
 - MultiTalk: https://github.com/MeiGen-AI/MultiTalk
-- Huggingface: https://huggingface.co
+- Huggingface: https://huggingface.co `<td>`
+
+`<video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430.mp4" width="450" controls loop>`
+
+`</video>`
+
+`</td>`
+      `<td>`
+          `<video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251006202718.mp4" width="450" controls loop></video>`
+      `</td>`
