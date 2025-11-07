@@ -124,9 +124,9 @@ def generate_video(req: MultiTalkRequest, stream_output=True):
         yield f"\n[结束] returncode={process.returncode}\n"
         video_path = f"{req.save_file}.mp4"
         if os.path.exists(video_path):
-            yield f"[成功] 视频已生成: {video_path}\n"
+            yield f"✅ 视频已生成: {video_path}\n"
         else:
-            yield "[失败] 视频未生成\n"
+            yield "❎ 视频未生成\n"
     if stream_output:
         return StreamingResponse(run_and_stream(), media_type="text/plain")
     else:

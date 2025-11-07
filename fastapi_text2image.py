@@ -43,14 +43,14 @@ def load_model(req: ModelRequest):
         # - 多 GPU: 使用 device_map="balanced" 让 accelerate/transformers 在多卡上分配
         cuda_count = torch.cuda.device_count()
         if cuda_count == 0:
-            print("ℹ️ 未检测到 GPU，使用 CPU 加载模型")
+            print("未检测到 GPU，使用 CPU 加载模型")
             pipe = DiffusionPipeline.from_pretrained(
                 req.model_id,
                 local_files_only=True,
             )
             pipe.to("cpu")
         elif cuda_count == 1:
-            print("ℹ️ 检测到 1 个 GPU，使用单卡（cuda:0）")
+            print("检测到 1 个 GPU，使用单卡（cuda:0）")
             pipe = DiffusionPipeline.from_pretrained(
                 req.model_id,
                 # torch_dtype=torch.float16,
@@ -59,7 +59,7 @@ def load_model(req: ModelRequest):
             )
             # pipe.to("cuda")
         else:
-            print(f"ℹ️ 检测到 {cuda_count} 个 GPU，使用 device_map='balanced' 分配到多卡")
+            print(f"检测到 {cuda_count} 个 GPU，使用 device_map='balanced' 分配到多卡")
             pipe = DiffusionPipeline.from_pretrained(
                 req.model_id,
                 device_map="balanced",

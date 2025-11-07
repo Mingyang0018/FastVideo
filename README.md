@@ -1,6 +1,8 @@
-# FastVideo 自动化生成短剧视频
+# FastVideo2 自动化生成短剧视频
 
 本项目支持自动化生成短剧视频，实现从主题到多角色交互的短剧视频的全流程自动化，包含生成剧本、合成语音、生成角色、生成视频、合成短剧。
+
+FastVideo2添加了双人同屏功能。
 
 ![img](https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/Screenshot.png)
 

@@ -1,15 +1,13 @@
-# from unittest import result
 from openai import OpenAI
 import numpy as np
 import edge_tts
 from edge_tts import Communicate
-from diffusers import DiffusionPipeline, WanImageToVideoPipeline, AutoencoderKLWan
-# from IPython.display import display
+# from diffusers import DiffusionPipeline, WanImageToVideoPipeline, AutoencoderKLWan
 import json
 import os
 from deep_translator import GoogleTranslator
 import torch
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import gc
 from rembg import remove
 import io
@@ -32,7 +30,6 @@ from dataclasses import dataclass, field, fields, asdict
 from typing import List, Dict, Any
 import asyncio
 import sys
-# import streamlit as st
 from io import StringIO
 
 class StreamlitLogger:
@@ -54,11 +51,10 @@ class StreamlitLogger:
 # ----------------------- dataclass 封装 -----------------------
 @dataclass
 class BaseInfo:
+    # 基本信息
     api_key: str = "xx"
-    # HF_TOKEN: str = "xx"
     model_id: str = "deepseek-chat"
     keywords: str = "喜剧"
-    # 基本信息
     theme: str = "默认主题"
     time_limit: int = 300
     language: str = "中文"
@@ -69,6 +65,7 @@ class BaseInfo:
     text2image_model: str = "./FLUX.1-dev"
     image2image_model: str = "./FLUX.1-Kontext-dev"
     image2video_model: str = "./Wan2.2-TI2V-5B-Diffusers"
+    multi_roles: bool = False
     extra: Dict[str, Any] = field(default_factory=dict)
 
     # 自动生成的属性
@@ -86,17 +83,14 @@ class BaseInfo:
 
     def __post_init__(self):
         self.OUTPUT_DIR = os.path.join(self.BASE_DIR, f"output")
-        # self.OUTPUT_DIR = os.path.join(self.BASE_DIR, f"output_{self.timestamp}")
         self.path_script = os.path.join(self.OUTPUT_DIR, "script.md")
         self.path_drama_data = os.path.join(self.OUTPUT_DIR, "drama_data.json")
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         torch.backends.cudnn.benchmark = True
-        # if self.HF_TOKEN:
-        #     os.environ["HF_TOKEN"] = self.HF_TOKEN
-        # 可选：检查 api_key / HF_TOKEN 是否有效
+        # 可选：检查 api_key 是否有效
         if not self.api_key:
-            print("警告: api_key 为空, 请在实例化 BaseInfo 时传入。")
+            print("⚠ api_key 为空, 请在实例化 BaseInfo 时传入。")
         # 代理
         if self.use_proxy:
             proxy_url = f"http://{self.proxy_host}:{self.proxy_port}"
@@ -143,17 +137,7 @@ class DramaData:
             scripts=data.get("scripts", {}),
             roles=data.get("roles", {})
         )
-    # @classmethod
-    # def load_json(cls, path: str):
-    #     with open(path, "r", encoding="utf-8") as f:
-    #         data = json.load(f)
-    #     base_info_data = data.get("base_info", {})
-    #     base_info = BaseInfo(**base_info_data)
-    #     return cls(
-    #         base_info=base_info,
-    #         scripts=data.get("scripts", {}),
-    #         roles=data.get("roles", {})
-    #     )
+
     @staticmethod
     def translate_text(text):
         return GoogleTranslator(source='auto', target='en').translate(text)
@@ -215,13 +199,11 @@ class DramaPipeline:
             content = response.choices[0].message.content
             result = self.safe_json_parse(content)
             if result is None:
-                print("不是JSON格式")
-                print(content)
                 return content
             return result
 
         except Exception as e:
-            print("❌ 无法获取API响应。", e)
+            print("❎ 无法获取API响应。", e)
             return {"正面提示词": "默认正面提示词", "负面提示词": "默认负面提示词"}
 
     # 1. 生成剧本
@@ -292,7 +274,7 @@ class DramaPipeline:
             candidates.append(script)
         return candidates
 
-    def refine_candidates_with_llm(self, top_scripts):
+    def refine_candidates_with_llm(self, top_scripts, num=1):
         """
         对 top-K 剧本生成改写变体, 每个生成 2 个
         """
@@ -310,7 +292,7 @@ class DramaPipeline:
 
     请生成新的完整剧本, 保持每个场景有对话、动作和风景转场描述。
     """
-            for _ in range(1):
+            for _ in range(num):
                 new_script = self.generate_response([{"role":"user","content":prompt}])
                 refined.append(new_script)
         return refined
@@ -320,13 +302,15 @@ class DramaPipeline:
         完整的迭代生成+评分+改写流程
         """
         MAX_ITER = 1       # 最大迭代轮数
-        INIT_CANDIDATES = 5  # 初始候选数量
-        TOP_K = 2          # 每轮选取 top K
+        INIT_CANDIDATES = 2  # 初始候选数量
+        TOP_K = 1          # 每轮选取 top K
         STOP_SCORE = 0.9  # 停止阈值
+        NUM_REFINE = 0
         # ---- 1. 初代生成 ----
-        print("初代生成候选剧本...\n")
+        print("生成候选剧本...\n")
         candidates = self.generate_candidates(n=INIT_CANDIDATES)
         top_scored = []
+
         for iter_idx in range(MAX_ITER):
             print(f"第 {iter_idx+1} 轮迭代评分...\n")
             # ---- 2. 评分 ----
@@ -339,24 +323,24 @@ class DramaPipeline:
                 break
 
             # ---- 3. 改写/变异 ----
-            print("生成改写...\n")
             top_scripts = [s for score, s in scored[:TOP_K]]
-            candidates = top_scripts + self.refine_candidates_with_llm(top_scripts)
+            candidates = top_scripts
 
-        # ---- 4. 循环结束后, 再对最后一批 candidates 评分 ----
-        print("最后一轮候选评分...\n")
-        scored = [(self.evaluate_script_with_llm(script), script) for script in candidates]
-        scored.sort(reverse=True, key=lambda x: x[0])
-        top_scored.extend(scored[:TOP_K])
+            if NUM_REFINE >= 1:
+                refined = self.refine_candidates_with_llm(top_scripts, NUM_REFINE)
+                candidates += refined
+                print("改写候选评分中...\n")
+                scored_refined = [(self.evaluate_script_with_llm(script), script) for script in refined]
+                scored_refined.sort(reverse=True, key=lambda x: x[0])
+                top_scored.extend(scored_refined[:TOP_K])
+
+        # ---- 5. 选出最佳剧本 ----
         top_scored.sort(reverse=True, key=lambda x: x[0])
-        print(top_scored)
-        best_score = top_scored[0][0]
-        best_script = top_scored[0][1]
-        # ---- 4. 保存 ----
+        best_score, best_script = top_scored[0]
         with open(self.data.base_info.path_script, "w", encoding="utf-8") as f:
             f.write(best_script)
-        print(f"✅ 最终剧本生成完成, 分数{best_score}！")
-        return best_script 
+        print(f"✅ 最终剧本生成完成, 分数{best_score:.3f}！")
+        return best_script
         
     def generate_roles_info(self):
         """
@@ -418,20 +402,48 @@ class DramaPipeline:
                         merged_roles[role] = info
 
         return merged_roles
-
+    
     def generate_json(self):
         """
         将Markdown剧本通过LLM转换为结构化JSON剧本
+        支持 multi_roles 模式：
+        - False: 单角色节点
+        - True: shots节点可同时包含2个角色（left / right）
         """
         path_script = self.data.base_info.path_script
         roles_info = self.data.roles
+        multi_roles = self.data.base_info.multi_roles
         with open(path_script, "r", encoding="utf-8") as f:
             script_md = f.read()
+
         roles_json = json.dumps(roles_info, ensure_ascii=False)
-        messages=[
+
+        # 根据multi_roles调整提示内容
+        if multi_roles:
+            shot_format = """
+        一个 shots 节点可以包含1个角色或2个角色，格式如下：
+        - 1个角色：
+            {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}}
+        - 2个角色：
+            {{"left": {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}},
+            "right": {{"role_id": "2", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}}
+            }}
+
+        注意：
+        - 多角色节点的每个子角色（left, right）的 type 不允许为 scenery；
+        - 多角色节点的每个子角色（left, right）的 type 可以为 dialogue 或 action；
+        - 合理适当的添加多角色节点，以丰富剧本的互动关系。
+            """
+        else:
+            shot_format = """
+        shots 节点为单角色格式：
+            {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}}
+        """
+
+        # ---------- 第一步：生成结构化JSON ----------
+        messages = [
             {"role": "system", "content": "你是一个剧本解析专家, 擅长将剧本内容解析为结构化的JSON格式。"},
-            {"role": "user", "content": 
-                f"""
+            {"role": "user", "content": f"""
     请将以下剧本内容解析为JSON格式：
 
     {script_md}
@@ -447,7 +459,7 @@ class DramaPipeline:
                 {{"role_id": "3", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}},
                 {{"role_id": "0", "风景描写": "风景内容", "type": "scenery"}},
                 {{"role_id": "2", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}},
-                {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "哈哈", "type": "action"}},
+                {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "哈哈", "type": "action"}}
             ]
         }},
         "scene2": {{
@@ -455,57 +467,45 @@ class DramaPipeline:
         }}
     }}
 
-    注意事项：
-    除0以外, role_id必须从以下角色列表中选择, 确保role_id与角色的对应关系正确:
+    角色列表（除role_id=0外必须从此中选择）：
     {roles_json}
+
     type字段规则：
-    - 对话节点 → "dialogue", role_id不为0, role_id必须在角色列表中选择
-    - 动作节点（无明确对话, 强调动作、表情、交互） → "action", role_id不为0, role_id必须在角色列表中选择
-    - 风景节点（role_id=0） → "scenery"
-    根据剧情上下文, 在剧情中自动穿插 scenery 节点（role_id=0）, 用于风景、环境氛围等转场过渡镜头, 格式为{{"role_id": "0", "风景描写": "描写环境或景物", "type": "scenery"}}, 风景描写不能包含人物角色, 只描写环境、景物或氛围；
-    根据剧情上下文, 在剧情中自动穿插 action 节点, 用于角色的动作镜头, 格式为{{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "哈哈", "type": "action"}}, 对话很短, 重点描写人物动作；
-    角色发言的时间先后顺序必须与原剧本一致, 同一角色可多次出现；
-    表情和动作应详细具体、清晰明了, 用于指导 image2video 生成对话或动作视频；
-    如果没有明确的表情和动作, 请使用"表情和动作": "在原位置保持不动"；
-    dialogue和action节点的对话内容不能为空, 如果没有内容, 可以根据上下文添加常用语气词（哈、哈哈、哎、好、行等）；
-    只返回JSON结构本身, 不需要额外解释。
-    """
-                }
+    - 对话节点 → "dialogue"（role_id≠0）
+    - 动作节点 → "action"（role_id≠0）
+    - 风景节点 → "scenery"（role_id=0）
+    风景节点格式：
+    {{"role_id": "0", "风景描写": "描写环境或景物", "type": "scenery"}}
+    {shot_format}
+    注意：
+        - role_id 必须来自角色列表；
+        - 对话与动作需反映角色的互动关系；
+        - 如果未指定表情或动作，请使用 "表情和动作": "在原位置保持不动"；
+        - 如果无对话内容，可补充常用语气词（哈、好、哎等）。
+        - 请根据剧情合理插入 scenery 节点（转场镜头）和 action 节点（人物动作镜头），
+        - 保持剧情时间顺序、逻辑连贯。
+        - 只返回JSON结构本身，不要额外解释。
+            """}
         ]
 
         script_data = self.generate_response(messages)
+
+        # ---------- 第二步：调整时间顺序 ----------
         messages2 = [
-            {"role": "system", "content": "你是一个剧本解析专家, 擅长解析剧情内容。"},
+            {"role": "system", "content": "你是一个剧本解析专家, 擅长解析剧情时间顺序与结构。"},
             {"role": "user", "content": f"""
-    以下是已有的剧情信息：
+    以下是初步生成的剧本结构：
     {script_data}
 
-    请检查以下剧本, 按照时间先后顺序修正剧情中的节点顺序：
+    请检查以下原剧本文本，按时间先后顺序修正shots节点顺序，保持剧情逻辑一致：
 
     {script_md}
 
-    输出格式与之前一致：
-    {{
-        "scene1": {{
-            "标题": "场景标题",
-            "描述": "场景描述内容",
-            "shots": [
-                {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}},
-                {{"role_id": "3", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}},
-                {{"role_id": "0", "风景描写": "风景内容", "type": "scenery"}},
-                {{"role_id": "2", "表情和动作": "表情和动作内容", "对话": "对话内容", "type": "dialogue"}},
-                {{"role_id": "1", "表情和动作": "表情和动作内容", "对话": "哈哈", "type": "action"}},
-            ]
-        }},
-        "scene2": {{
-            ...
-        }}
-    }}
-
-    注意事项：
-    根据剧情上下文, 按照时间先后顺序调整剧情中的节点顺序, 保持对话节点、动作节点、风景节点的时间先后顺序与原剧本一致。
-    """}
+    输出格式需保持与输入相同（包含 multi_roles 支持）：
+    {shot_format}
+            """}
         ]
+
         script_data_2 = self.generate_response(messages2)
         return script_data_2
 
@@ -513,13 +513,13 @@ class DramaPipeline:
     def refine_type_by_dialogue(script_data: dict):
         """
         根据对话长度修正规则：
-        - 对话长度 > 3 → dialogue
-        - 对话长度 <= 3 → action
+        - 对话长度 > 2 → dialogue
+        - 对话长度 <= 2 → action
         """
         for scene, scene_data in script_data.items():
             for shot in scene_data.get("shots", []):
-                if shot["type"] in ["dialogue", "action"] and "对话" in shot:
-                    if len(shot["对话"]) > 3:
+                if shot.get('type', None) in ["dialogue", "action"] and shot.get('对话', None):
+                    if len(shot["对话"]) > 2:
                         shot["type"] = "dialogue"
                     else:
                         shot["type"] = "action"
@@ -562,22 +562,26 @@ class DramaPipeline:
     
     def generate_script_and_shot(self, skip_if_exists=True):
         """
-        生成剧本和镜头
+        生成剧本和镜头（支持 multi_roles 多角色节点）
         """ 
-        results=[]
-        print_text=''
-        # self.data = self.data.load_json()
+        results = []
         results.append(self.data.base_info.path_script)
         results.append(self.data.base_info.path_drama_data)
-        # 如果results中文件都已存在, 则直接跳过
+
+        # 如果文件存在则跳过
         if all(os.path.exists(path) for path in results) and skip_if_exists:
             print("剧本已存在, 跳过生成步骤。")
-            return results, print_text
-        print("[INFO] 正在生成剧本...\n")
-        self.generate_script_iterative()
-        roles_info = self.generate_roles_info()
+            return results
 
-        # 角色编号映射
+        print("[INFO] 正在生成剧本...\n")
+        if os.path.exists(self.data.base_info.path_script) and skip_if_exists:
+            print("script已存在，直接解析...")
+        else:
+            self.generate_script_iterative()
+
+        # 生成角色信息
+        roles_info = self.generate_roles_info()
+        # print(roles_info)
         role_id_map = {f"{i + 1}": role for i, role in enumerate(roles_info.keys())}
         roles_dict = {}
         for role_id, role_name in role_id_map.items():
@@ -589,65 +593,108 @@ class DramaPipeline:
                 "name_en": DramaData.translate_text(role_name),
             }
         self.data.roles = roles_dict
+
+        # 调用 LLM 解析剧本为JSON
         script_data = self.generate_json()
-        # 向script_data['scene1']['shots']中添加chatID, 内容为scene1-数字, 数字为0,1,2, 3
+
+        # === 处理 shots 节点 ===
+        multi_roles = getattr(self.data.base_info, "multi_roles", False)
         for scene, script_value in script_data.items():
-            for index, plot in enumerate(script_value['shots']):
-                plot['chatID'] = f"{scene}_{index}"
-                # 如果是风景节点（type == "scenery"）
-                if plot.get('type', None) == "scenery":
-                    plot['name'] = "风景"
+            for index, plot in enumerate(script_value["shots"]):
+                # 为每个节点分配唯一 chatID
+                plot["chatID"] = f"{scene}_{index}"
+
+                # 如果是风景节点
+                if isinstance(plot, dict) and plot.get("type") == "scenery":
+                    plot["name"] = "风景"
                     plot.setdefault("role_id", "0")
                     continue
-                # 修正缺失的 type
+
+                # === 多角色节点支持 ===
+                if multi_roles and any(k in plot for k in ["left", "center", "right"]):
+                    # 遍历各位置角色
+                    for pos in ["left", "center", "right"]:
+                        if pos not in plot:
+                            continue
+                        role_item = plot[pos]
+
+                        # 检查type
+                        if "type" not in role_item:
+                            if role_item.get("对话"):
+                                role_item["type"] = "dialogue"
+                            else:
+                                role_item["type"] = "action"
+
+                        # 修正role_id
+                        if role_item["role_id"] not in self.data.roles:
+                            print(f"修正角色名: {role_item['role_id']} -> 1")
+                            role_item["role_id"] = "1"
+
+                        # 添加角色名
+                        role_item["name"] = self.data.roles[role_item["role_id"]]["name"]
+
+                    # 整个plot不再单独设置name/type
+                    continue
+
+                # === 单角色节点逻辑 ===
                 if "type" not in plot:
                     if plot.get("对话"):
                         plot["type"] = "dialogue"
                     else:
                         plot["type"] = "action"
-                # 修正 role_id
-                if plot['role_id'] not in self.data.roles:
+
+                # 修正role_id
+                if plot["role_id"] not in self.data.roles:
                     print(f"修正角色名: {plot['role_id']} -> 1")
-                    plot['role_id'] = '1'
+                    plot["role_id"] = "1"
+
                 # 补充角色名字
-                plot['name'] = self.data.roles[plot['role_id']]['name']
-        # 应用 refine_type_by_dialogue
+                plot["name"] = self.data.roles[plot["role_id"]]["name"]
+
+        # refine 类型
         script_data = self.refine_type_by_dialogue(script_data)
         self.data.scripts = script_data
-        # 添加场景角色信息
+
+        # === 添加场景角色信息 ===
         for scene, value in self.data.scripts.items():
             roles_id_ordered = []
-            value['scene_roles'] = []
-            for chat in value['shots']:
-                if chat['type'] == "scenery":  # 跳过风景节点
+            value["scene_roles"] = []
+            for chat in value["shots"]:
+                # 处理风景节点
+                if isinstance(chat, dict) and chat.get("type") == "scenery":
                     continue
-                chat['role_id'] = [id for id, name in self.data.roles.items() if name['name'] == chat['name']][0]
-                id = chat['role_id']
-                if id not in roles_id_ordered:
-                    roles_id_ordered.append(id)
-                    value['scene_roles'].append(
-                        {
-                            'role_id': f'{id}',
-                            'name': chat['name'],
-                        }
-                    )
+
+                # 处理多角色节点
+                if multi_roles and any(k in chat for k in ["left", "center", "right"]):
+                    for pos in ["left", "center", "right"]:
+                        if pos in chat:
+                            rid = chat[pos]["role_id"]
+                            rname = chat[pos]["name"]
+                            if rid not in roles_id_ordered:
+                                roles_id_ordered.append(rid)
+                                value["scene_roles"].append({"role_id": rid, "name": rname})
+                else:
+                    rid = chat["role_id"]
+                    rname = chat["name"]
+                    if rid not in roles_id_ordered:
+                        roles_id_ordered.append(rid)
+                        value["scene_roles"].append({"role_id": rid, "name": rname})
+
+        # === 更新base_info并保存 ===
         base_info = self.generate_base_info()
-        for key, value in base_info.get('base_info', {}).items():
+        for key, value in base_info.get("base_info", {}).items():
             self.data.base_info[key] = value
-        # 保存self.data到json文件
         self.data.save_json()
-        print_text += f"✅ 剧本和镜头生成完成！\n"
-        # 返回生成的剧本文件
-        return results, print_text
+
+        return results
 
     # 2. 生成语音
-    # 调用 DeepSeek 大模型 API, 根据剧本生成角色描述和音色
+    # 调用 DeepSeek API, 根据剧本生成角色描述和音色
     def generate_roles_and_voices(self, role_to_update=None, exclude_timbres=None):
         path_script = self.data.base_info.path_script
         with open(path_script, "r", encoding="utf-8") as f:
             script_content = f.read()
         roles_name = [roles['name'] for id, roles in self.data.roles.items()]
-        # roles_name转化为字符串
         roles_name_str = ', '.join(roles_name)
         exclude_timbres = exclude_timbres or []
         while True:
@@ -687,7 +734,8 @@ class DramaPipeline:
                 print("解析角色音色失败, 重试...\n", e)
                 continue
 
-    # 合成多角色语音
+
+    # 合成角色音色（角色自述）
     async def synthesize_roles(self, roles_and_voices):
         synthesized_roles = {}
         exclude_timbres = set()
@@ -698,16 +746,16 @@ class DramaPipeline:
 
             while role_name not in synthesized_roles:
                 try:
-                    print(f"正在合成角色 {role_name}的语音...\n")
+                    print(f"正在合成角色 {role_name} 的语音样本...\n")
                     communicate = Communicate(role["describe"], details["voice"])
                     path_voice = os.path.join(self.data.base_info.OUTPUT_DIR, f'voice_{role_id}.wav')
                     await communicate.save(path_voice)
-                    print(f"{role_name} 的语音{details['voice']}合成完成！")
+                    print(f"✅ {role_name} 的音色 {details['voice']} 合成完成！")
                     role['voice'] = details["voice"]
                     synthesized_roles[role_name] = details
                     exclude_timbres.add(details["voice"])
                 except Exception as e:
-                    print(f"❌ 合成角色 {role_name} 的语音时出错：{e}")
+                    print(f"❎ 合成角色 {role_name} 的语音时出错：{e}")
                     print(f"正在为角色 {role_name} 重新生成音色...\n")
                     exclude_timbres.add(details["voice"])
                     new_voice = self.generate_roles_and_voices(role_to_update=role_name, exclude_timbres=list(exclude_timbres))
@@ -715,74 +763,117 @@ class DramaPipeline:
                         details["voice"] = new_voice[role_name]["voice"]
                         role['voice'] = details["voice"]
                     else:
-                        print(f"❌ 无法为角色 {role_name} 重新生成音色, 跳过该角色。")
+                        print(f"❎ 无法为角色 {role_name} 重新生成音色, 跳过该角色。")
                         break
 
         return synthesized_roles
 
-    # 合成对话音频
+
+    # 合成对话语音（支持 multi_roles=True）
     async def generate_audio(self):
-        for key, value in self.data.scripts.items():
+        multi_roles = self.data.base_info.multi_roles
+        for scene, value in self.data.scripts.items():
             for index, plot in enumerate(value['shots']):
-                role_id = plot['role_id']
-                if role_id == "0":
+                # 跳过风景节点
+                if plot.get("type") == "scenery":
                     continue
-                chatID = plot['chatID']
-                role = plot['name']
+
+                chatID = plot.get('chatID')
+
+                # 如果是多角色镜头
+                if multi_roles and any(k in plot for k in ["left", "center", "right"]):
+                    for pos in ["left", "center", "right"]:
+                        if pos not in plot:
+                            continue  # 跳过不存在的角色
+                        sub = plot[pos]
+                        role_id = sub['role_id']
+                        role_name = sub['name']
+                        dialogue = sub['对话']
+
+                        voice = self.data.roles[role_id]['voice']
+                        filename = f"{chatID}_{pos}.wav"
+                        path_audio = os.path.join(self.data.base_info.OUTPUT_DIR, filename)
+
+                        print(f"\n ChatID: {chatID} | 多角色: {pos} | 角色: {role_name} | 音色: {voice}")
+                        try:
+                            communicate = Communicate(dialogue, voice)
+                            await communicate.save(path_audio)
+                            sub['path_audio'] = path_audio
+                            print(f"✅ 合成完成: {filename}")
+                        except Exception as e:
+                            print(f"❎ 合成 {chatID}_{pos} 语音失败: {e}")
+                    continue  # 跳过单角色逻辑
+
+                # 单角色节点
+                role_id = plot.get('role_id')
+                if not role_id or role_id == "0":
+                    continue
+
+                role_name = plot['name']
                 dialogue = plot['对话']
-                print(chatID)
-                print(role)
+                voice = self.data.roles[role_id]['voice']
+
+                filename = f"{chatID}.wav"
+                path_audio = os.path.join(self.data.base_info.OUTPUT_DIR, filename)
+                print(f"\n ChatID: {chatID} | 单角色: {role_name} | 音色: {voice}")
                 try:
-                    voice = self.data.roles[role_id]['voice']
-                    print(voice)
-                    print(f"正在合成 {plot['chatID']} 的语音...\n")
                     communicate = Communicate(dialogue, voice)
-                    path_audio = os.path.join(self.data.base_info.OUTPUT_DIR, f'{chatID}.wav')
                     await communicate.save(path_audio)
+                    plot['path_audio'] = path_audio
                     print(f"✅ 语音合成完成！")
-                    # 添加音频路径至plot['path_audio']
-                    plot['path_audio']=path_audio
                 except Exception as e:
-                    print(f"❌ 合成对话 {chatID} 的语音时出错：{e}")
-    
+                    print(f"❎ 合成对话 {chatID} 的语音时出错：{e}")
+
+
     async def generate_voices(self, skip_if_exists=True):
-        results=[]
-        print_text=''
+        multi_roles = self.data.base_info.multi_roles
+        results = []
         self.data = self.data.load_json()
+
+        # 收集角色音色语音
         for role_id, role in self.data.roles.items():
-            path_voice = os.path.join(self.data.base_info.OUTPUT_DIR, f'voice_{role_id}.wav')
-            results.append(path_voice)
-        for key, value in self.data.scripts.items():
-            for index, plot in enumerate(value['shots']):
-                if plot['type'] != 'scenery':
-                    chatID = plot['chatID']
-                    path_audio = os.path.join(self.data.base_info.OUTPUT_DIR, f'{chatID}.wav')
-                    results.append(path_audio)
-        # 如果results中所有文件都存在, 则直接跳过
-        if all(os.path.exists(path) for path in results) and skip_if_exists:
+            results.append(os.path.join(self.data.base_info.OUTPUT_DIR, f'voice_{role_id}.wav'))
+
+        # 收集所有镜头中需要生成的语音文件路径
+        for scene, value in self.data.scripts.items():
+            for plot in value['shots']:
+                if plot.get('type') == 'scenery':
+                    continue
+                chatID = plot.get('chatID')
+                if not chatID:
+                    continue
+
+                if multi_roles and any(k in plot for k in ["left", "center", "right"]):
+                    for pos in ["left", "center", "right"]:
+                        if pos in plot:
+                            results.append(os.path.join(self.data.base_info.OUTPUT_DIR, f'{chatID}_{pos}.wav'))
+                else:
+                    results.append(os.path.join(self.data.base_info.OUTPUT_DIR, f'{chatID}.wav'))
+
+        # 若所有文件已存在，则跳过
+        if all(os.path.exists(p) for p in results) and skip_if_exists:
             print("所有语音已存在, 跳过生成步骤。")
-            return results, print_text
+            return results
+
         print("[INFO] 正在生成语音...\n")
+
+        # 获取支持中文的Azure语音
         voices = await edge_tts.list_voices()
-        # 获取所有支持中文的语音
-        zh_voices = [voice for voice in voices if "zh" in voice["Locale"]]
-        # 获取short name列表
-        shortnames_zh_voices = [voice["ShortName"] for voice in zh_voices]
-        # print(shortnames_zh_voices)
-        self.shortnames_zh_voices = shortnames_zh_voices
-        # 根据剧本生成角色描述和音色
+        zh_voices = [v for v in voices if "zh" in v["Locale"]]
+        self.shortnames_zh_voices = [v["ShortName"] for v in zh_voices]
+
+        # 生成角色音色
         roles_and_voices = self.generate_roles_and_voices()
-        # 合成语音（传入编号映射）
         roles_and_voices = await self.synthesize_roles(roles_and_voices)
+
+        # 生成语音文件（支持multi_roles）
         await self.generate_audio()
-        # 保存self.data到json文件
+
+        # 保存JSON
         self.data.save_json()
-        print_text += f"✅ 语音生成完成！\n"
-        return results, print_text
-            
-    # def generate_voices_sync(self):
-    #     import asyncio
-    #     return asyncio.get_event_loop().run_until_complete(self.generate_voices())
+        return results
+
+
     def generate_voices_sync(self, skip_if_exists=True):
         return asyncio.run(self.generate_voices(skip_if_exists=skip_if_exists))
 
@@ -790,17 +881,25 @@ class DramaPipeline:
     def generate_roles(self, skip_if_exists=True):
         """调用 LLM 生成角色提示词, 并生成角色图像"""
         results=[]
-        print_text=''
         self.data = self.data.load_json()
-        for role_id in self.data.roles.keys():
+        
+        # 找出所有角色图像路径
+        missing_roles = {}
+        for role_id, role_info in self.data.roles.items():
             path_image = os.path.join(self.data.base_info.OUTPUT_DIR, f"{role_id}.png")
             results.append(path_image)
+            # 如果图片不存在，则添加到missing_roles中
+            if not os.path.exists(path_image):
+                missing_roles[role_id] = role_info
         # 如果results中文件都已存在, 则直接跳过
         if all(os.path.exists(path) for path in results) and skip_if_exists:
             print("所有角色已存在, 跳过生成步骤。\n")
-            return results, print_text
+            return results
         
         print("[INFO] 正在生成角色...\n")
+        # 临时保存原始数据，以便后续只处理缺少图像的角色
+        original_roles = self.data.roles
+        self.data.roles = missing_roles
         prompts_init, prompts_update = self.generate_roles_prompts()
         for role_id, role_info in self.data.roles.items():
             if role_id in prompts_init:
@@ -823,10 +922,12 @@ class DramaPipeline:
                 input_path=path_image,
                 output_path=path_image.replace('.png', '_clean.png')
             )
+        # === 将缺失角色信息更新回总数据 ===
+        original_roles.update(self.data.roles)
+        self.data.roles = original_roles
         # 保存self.data到json文件
         self.data.save_json()
-        print_text += f"✅ 角色生成完成！\n"
-        return results, print_text
+        return results
 
     def generate_roles_prompts(self):
         path_script = self.data.base_info.path_script
@@ -886,7 +987,7 @@ class DramaPipeline:
                 - 文化背景: {self.data.base_info.culture_background}
                 - 剧本内容: \n{script_content}\n
 
-                以下是每个角色的初始提示词:
+                以下是角色的初始提示词:
                 {prompts_init}
 
                 请在这些初始提示词的基础上, 为每个角色生成优化后的正面提示词和负面提示词, 
@@ -961,7 +1062,6 @@ class DramaPipeline:
                     # 转化image为统一的长宽
                     path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{role_id}_{i}.png")
                     resized_img = self.resize_keep_aspect(image=image, save_path=path_output)
-                    # display(resized_img)
                     del image, resized_img
                     score, comps = self.score_character(path_output, prompt)
                     candidate_scores.append((score, path_output))
@@ -1000,7 +1100,7 @@ class DramaPipeline:
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
 
@@ -1008,14 +1108,13 @@ class DramaPipeline:
     def generate_scenes(self, skip_if_exists=True):
         """根据剧本生成场景图像"""
         results=[]
-        print_text=''
         self.data = self.data.load_json()
         for text in ['opening', 'ending']:
             path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{text}_background.png")
             results.append(path_output)
         results += [(os.path.join(self.data.base_info.OUTPUT_DIR, "opening_scene.png"))]
         for scene, value in self.data.scripts.items():
-            path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_opening_background.png")
+            path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_background.png")
             results.append(path_output)
         for scene, value in self.data.scripts.items():
             for scene_role in value['scene_roles']:
@@ -1024,25 +1123,64 @@ class DramaPipeline:
                 results.append(final_path)
         for scene, value in self.data.scripts.items():
             for idx, chat_info in enumerate(value['shots']):
-                if str(chat_info['type']) == "scenery":
+                if chat_info.get('type', None) == "scenery":
                     chatID = chat_info['chatID']
                     path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}_scenery.png")
                     results.append(path_output)
+        multi_roles_chats = {
+            scene: [chat for chat in value['shots'] if any(pos in chat for pos in ['left', 'center', 'right'])]
+            for scene, value in self.data.scripts.items()
+        }
+        multi_roles_chats = {s: c for s, c in multi_roles_chats.items() if c}
+
+        for scene, chats in multi_roles_chats.items():
+            for chat in chats:
+                chatID = chat["chatID"]
+                out_path = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}_multi.png")
+                results.append(out_path)
         # 如果results中文件都已存在, 则直接跳过
         if all(os.path.exists(path) for path in results) and skip_if_exists:
             print("所有场景已存在, 跳过生成步骤。\n")
-            return results, print_text
+            return results
         
         print("[INFO] 正在生成场景...\n")
-        background_prompts = self.generate_scene_background_prompts()
-        for scene, value in self.data.scripts.items():
-            value['background_prompt'] = background_prompts[scene]['正面提示词']
-            value['background_negative_prompt'] = background_prompts[scene]['负面提示词']
-            value['background_prompt_en'] = DramaData.translate_text(value['background_prompt'])
-            value['background_negative_prompt_en'] = DramaData.translate_text(value['background_negative_prompt'])
         
-        path_background=self.generate_scene_background_image(skip_if_exists=skip_if_exists)
-        # results.append(path_background)
+         # === 记录缺失类型 ===
+        missing_background_scenes = []
+        missing_role_scenes = []
+        missing_scenery_scenes = []
+
+        # 场景背景缺失
+        for scene in self.data.scripts:
+            path_bg = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_background.png")
+            if not os.path.exists(path_bg):
+                missing_background_scenes.append(scene)
+
+        # 场景角色缺失
+        for scene, value in self.data.scripts.items():
+            for scene_role in value['scene_roles']:
+                path_role = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_role_{scene_role['role_id']}.png")
+                if not os.path.exists(path_role):
+                    missing_role_scenes.append((scene, scene_role['role_id']))
+
+        # scenery 缺失
+        for scene, value in self.data.scripts.items():
+            for chat_info in value['shots']:
+                if chat_info.get('type', None) == "scenery":
+                    path_scenery = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chat_info['chatID']}_scenery.png")
+                    if not os.path.exists(path_scenery):
+                        missing_scenery_scenes.append((scene, chat_info['chatID']))
+        # === 背景提示词生成（仅缺失场景） ===
+        if missing_background_scenes:
+            background_prompts = self.generate_scene_background_prompts()
+            for scene in missing_background_scenes:
+                value = self.data.scripts[scene]
+                value['background_prompt'] = background_prompts[scene]['正面提示词']
+                value['background_negative_prompt'] = background_prompts[scene]['负面提示词']
+                value['background_prompt_en'] = DramaData.translate_text(value['background_prompt'])
+                value['background_negative_prompt_en'] = DramaData.translate_text(value['background_negative_prompt'])
+            path_background=self.generate_scene_background_image(skip_if_exists=skip_if_exists)
+    
         if skip_if_exists and os.path.exists(os.path.join(self.data.base_info.OUTPUT_DIR, "opening_scene.png")):
             print("opening_scene 已存在, 跳过生成。\n")
         else:
@@ -1057,7 +1195,6 @@ class DramaPipeline:
             if not role_paths:
                 print("未找到角色图, 保存原背景")
                 opening_image.save(os.path.join(self.data.base_info.OUTPUT_DIR, "opening_scene.png"))
-                # display(opening_image)
             else:
                 bg = opening_image.copy()
                 # 目标尺寸：单人时占比更大, 双人时为双方留出空间
@@ -1088,36 +1225,273 @@ class DramaPipeline:
                     bg.paste(imgs[0], (left_x, y), imgs[0])
                     bg.paste(imgs[1], (right_x, y), imgs[1])
 
-                # display(bg)
                 bg.save(os.path.join(self.data.base_info.OUTPUT_DIR, "opening_scene.png"))
-        scene_role_prompts = self.generate_scene_role_prompts()
-        for scene, value in self.data.scripts.items():
-            for role in value['scene_roles']:
-                # 人物角色 prompt
-                role['prompt'] = scene_role_prompts[scene][role['role_id']]['正面提示词']
-                role['negative_prompt'] = scene_role_prompts[scene][role['role_id']]['负面提示词']
-                role['prompt_en'] = DramaData.translate_text(role['prompt'])
-                role['negative_prompt_en'] = DramaData.translate_text(role['negative_prompt'])
-        path_scene_roles=self.generate_scene_role_image(skip_if_exists=skip_if_exists)
-        # results += path_scene_roles
-        scenery_prompts = self.generate_scenery_prompts()
-
-        for scene, value in self.data.scripts.items():
-            for chat in value['shots']:
-                if chat['type'] == "scenery":
-                    # scenery 节点 prompt 使用 chatID
-                    chat_id = chat['chatID']
-                    chat['prompt'] = scenery_prompts[scene][chat_id]['正面提示词']
-                    chat['negative_prompt'] = scenery_prompts[scene][chat_id]['负面提示词']
-                    chat['prompt_en'] = DramaData.translate_text(chat['prompt'])
-                    chat['negative_prompt_en'] = DramaData.translate_text(chat['negative_prompt'])
-        path_scene_scenery=self.generate_scene_scenery_image(skip_if_exists=skip_if_exists)
-        # results += path_scene_scenery
+                
+        # === 场景角色提示词生成（仅缺失角色） ===
+        if missing_role_scenes:
+            scene_role_prompts = self.generate_scene_role_prompts()
+            for scene, role_id in missing_role_scenes:
+                for role in self.data.scripts[scene]['scene_roles']:
+                    if role['role_id'] == role_id:
+                        role['prompt'] = scene_role_prompts[scene][role_id]['正面提示词']
+                        role['negative_prompt'] = scene_role_prompts[scene][role_id]['负面提示词']
+                        role['prompt_en'] = DramaData.translate_text(role['prompt'])
+                        role['negative_prompt_en'] = DramaData.translate_text(role['negative_prompt'])
+            path_scene_roles=self.generate_scene_role_image(skip_if_exists=skip_if_exists)
+        
+        # === scenery 提示词生成（仅缺失） ===
+        if missing_scenery_scenes:
+            scenery_prompts = self.generate_scenery_prompts()
+            for scene, chat_id in missing_scenery_scenes:
+                for chat in self.data.scripts[scene]['shots']:
+                    if chat['chatID'] == chat_id and chat.get('type', None) == "scenery":
+                        chat['prompt'] = scenery_prompts[scene][chat_id]['正面提示词']
+                        chat['negative_prompt'] = scenery_prompts[scene][chat_id]['负面提示词']
+                        chat['prompt_en'] = DramaData.translate_text(chat['prompt'])
+                        chat['negative_prompt_en'] = DramaData.translate_text(chat['negative_prompt'])
+            path_scene_scenery=self.generate_scene_scenery_image(skip_if_exists=skip_if_exists)
+        
+        # 如果self.data.base_info.multi_roles为True，则生成多角色同屏画面
+        if self.data.base_info.multi_roles:
+            print("[INFO] 生成多角色同屏画面...\n")
+            self.generate_multiroles_scene_image(skip_if_exists=skip_if_exists)
         # 保存self.data到json文件
         self.data.save_json()
-        print_text += f"✅ 场景生成完成！\n"
-        return results, print_text
+        return results
 
+    def generate_multi_roles_background_prompts(self):
+        """
+        一次性为所有多角色同屏画面（含 left/center/right 的分镜）生成背景 image2image 提示词。
+        输出结构：
+        {
+            'scene1': {
+                'chatID': {'正面提示词': '...', '负面提示词': '...'},
+                ...
+            },
+            'scene2': {...}
+        }
+        """
+        scripts = self.data.scripts
+        multi_roles_scenes = {}
+
+        # 仅保留包含多角色的分镜（left/right/center）
+        for scene, value in scripts.items():
+            multi_chats = {}
+            for chat in value['shots']:
+                # 识别多角色节点（含left/right/center）
+                positions = [p for p in ['left', 'center', 'right'] if p in chat]
+                if positions:
+                    chatID = chat.get("chatID", f"{scene}_{len(multi_chats)}")
+                    multi_chats[chatID] = chat
+            if multi_chats:
+                multi_roles_scenes[scene] = multi_chats
+
+        if not multi_roles_scenes:
+            print("⚠ 未检测到任何多角色同屏画面。")
+            return {}
+
+        # 组织提示词生成指令
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是一个视觉提示词专家，擅长为AI绘画image2image生成场景背景的正面和负面提示词。"
+                    "当前任务是生成多角色同屏画面（含left/center/right角色）下的背景描述，"
+                    "要求保持人物角色的外貌和服饰不变，只描写背景和画面。"
+                )
+            },
+            {
+                "role": "user",
+                "content": f"""
+    短剧语言为 {self.data.base_info.language}，
+    短剧风格为 {self.data.base_info.drama_style}，
+    文化背景为 {self.data.base_info.culture_background}。
+
+    请为以下多角色同屏画面生成背景提示词（用于image2image）：
+
+    {multi_roles_scenes}
+
+    输出格式为：
+    {{
+    'scene1': {{
+        chatID: {{'正面提示词': '...', '负面提示词': '...'}},
+        ...
+    }},
+    'scene2': {{ ... }}
+    }}
+    chatID为多角色同屏画面的分镜ID, chatID不能重复，如scene1_6, scene2_5等。
+    要求：
+    - 每个场景的背景风格与短剧整体风格一致；
+    - 正面提示词用于描述背景、光照、空间布局、氛围；
+    - 负面提示词用于排除模糊、变形、人物错位、不自然光照等；
+    - 正面提示词长度 ≤ 100字；
+    - 不要包含角色外貌或动作描述；
+    - 场景应符合 {self.data.base_info.culture_background} 文化与 {self.data.base_info.drama_style} 风格；
+    - 用 {self.data.base_info.language} 输出；
+    - 不得使用含文化先验的专有名词，如“天宫”“道观”“西方宫殿”，
+    应使用直观描述（例如“石柱大厅”“竹林小屋”“白色圆顶大厅”等）。
+    """
+            }
+        ]
+
+        result = self.generate_response(messages)
+        return result
+
+    def generate_multiroles_scene_image(self, skip_if_exists=True):
+        output_dir = self.data.base_info.OUTPUT_DIR
+        # === Step 1: 识别多角色分镜 ===
+        scripts = self.data.scripts
+        multi_roles_chats = {
+            scene: [chat for chat in value['shots'] if any(pos in chat for pos in ['left', 'center', 'right'])]
+            for scene, value in scripts.items()
+        }
+        multi_roles_chats = {s: c for s, c in multi_roles_chats.items() if c}
+
+        if not multi_roles_chats:
+            print("⚠ 未检测到任何多角色同屏分镜，跳过。")
+            return []
+
+        # === Step 2: 一次性生成所有多角色分镜的背景提示词 ===
+        multi_roles_prompts = self.generate_multi_roles_background_prompts()
+        # 启动 image2image FastAPI
+        conda_env = "fast_video"
+        uvicorn_host = "127.0.0.1"
+        uvicorn_port = 5103
+        api_url = f"http://{uvicorn_host}:{uvicorn_port}/image2image"
+        model_api = f"http://{uvicorn_host}:{uvicorn_port}/load_model"
+
+        fastapi_process = subprocess.Popen(
+            ["conda", "run", "-n", conda_env, "uvicorn", "fastapi_image2image:app", "--host", uvicorn_host, "--port", str(uvicorn_port)],
+            stdout=None, stderr=None
+        )
+        self.wait_for_fastapi_ready(api_url)
+        requests.post(model_api, json={"model_id": self.data.base_info.image2image_model})
+        results = []
+        try:
+            for scene, chats in multi_roles_chats.items():
+                for chat in chats:
+                    chatID = chat["chatID"]
+                    out_path = os.path.join(output_dir, f"{chatID}_multi.png")
+                    if skip_if_exists and os.path.exists(out_path):
+                        print(f"{chatID}_multi 已存在，跳过。")
+                        continue
+                    # 判断left, center, right有哪些存在
+                    all_position = ["left", "center", "right"]
+                    exist_position = [pos for pos in all_position if pos in chat]
+                    if not exist_position:
+                        print(f"跳过 {chatID}，场景分镜中位置缺失。")
+                        continue
+
+                    # 读取角色图片
+                    all_role_images = []
+                    for pos in exist_position:
+                        role_id = chat[pos]["role_id"]
+                        role_path = os.path.join(output_dir, f"{scene}_role_{role_id}.png")
+
+                        if not os.path.exists(role_path):
+                            print(f"跳过 {chatID}，角色图{scene}_role_{role_id}缺失。")
+                            continue
+                        # 检查扣图图片f"{scene}_role_{role_id}_clean.png"是否存在，不存在则创建扣图
+                        clean_path = os.path.join(output_dir, f"{scene}_role_{role_id}_clean.png")
+                        if not os.path.exists(clean_path):
+                            self.extract_person(
+                                input_path=role_path,
+                                output_path=clean_path
+                            )
+                        # 读取扣图图片
+                        img = Image.open(clean_path).convert("RGBA")
+                        all_role_images.append((pos, img))
+                    if not all_role_images:
+                        continue
+
+                    # 左右拼接all_role_images得到temp_path
+                    max_h = max(img.height for _, img in all_role_images)
+                    total_w = sum(img.width for _, img in all_role_images)
+                    target_w = getattr(self.data.base_info, "width", 720)
+                    target_h = getattr(self.data.base_info, "height", 1280)
+                    canvas = Image.new("RGBA", (total_w, max_h), (0, 0, 0, 0))
+                    
+                    # 计算目标坐标
+                    cur_x = 0
+                    base_y = (target_h - max_h) // 2
+                    role_bboxes = {}  # 存储角色bbox
+                    for pos, img in all_role_images:
+                        x1, y1 = cur_x, base_y 
+                        x2, y2 = x1 + img.width, y1 + img.height
+                        canvas.paste(img, (x1, base_y), img)
+                        role_bboxes[pos] = [x1, y1, x2, y2]
+                        cur_x += img.width
+
+                    # === 调整画面比例 ===
+                    temp_path = os.path.join(output_dir, f"{chatID}_temp_merge.png")
+
+                    # 原始画布尺寸
+                    orig_w, orig_h = canvas.size
+
+                    # === 1️⃣ 计算缩放比例与补边偏移 ===
+                    pad_shift_ratio = 0.2
+                    scale_ratio = min(target_w / orig_w, target_h / orig_h)
+                    new_w = int(orig_w * scale_ratio)
+                    new_h = int(orig_h * scale_ratio)
+                    paste_x = (target_w - new_w) // 2
+                    offset_y = int((target_h - new_h) * pad_shift_ratio)
+                    paste_y = (target_h - new_h) // 2 + offset_y
+
+                    # === 2️⃣ 使用 resize_keep_aspect 生成缩放图片 ===
+                    self.resize_keep_aspect(
+                        canvas,
+                        save_path=temp_path,
+                        target_size=(target_w, target_h),
+                        mode="pad",
+                        pad_shift_ratio=pad_shift_ratio,
+                    )
+                    print(f"已合成 {chatID}_temp_merge.png")
+
+                    # === 3️⃣ 缩放并平移 bbox ===
+                    scaled_bboxes = {}
+                    for pos, bbox in role_bboxes.items():
+                        x1, y1, x2, y2 = bbox
+                        x1 = int(x1 * scale_ratio + paste_x)
+                        x2 = int(x2 * scale_ratio + paste_x)
+                        y1 = int(y1 * scale_ratio + paste_y)
+                        y2 = int(y2 * scale_ratio + paste_y)
+                        scaled_bboxes[pos] = [x1, y1, x2, y2]
+
+                    # === 4️⃣ 保存缩放后的 bbox ===
+                    for pos, bbox in scaled_bboxes.items():
+                        if pos in chat:
+                            chat[pos]['bbox'] = bbox
+                            
+                    if scene in multi_roles_prompts and chatID in multi_roles_prompts[scene]:
+                        background_prompt = DramaData.translate_text("保持人物角色的外貌和服饰不变，生成背景画面，修复人物角色的缺失或模糊部分。"+multi_roles_prompts[scene][chatID]['正面提示词'])
+                        negative_prompt = DramaData.translate_text(multi_roles_prompts[scene][chatID]['负面提示词'])
+                    else:
+                        print(f"⚠ 未找到 {chatID} 的背景提示词，使用默认模板。")
+                        background_prompt = DramaData.translate_text(f"保持人物角色的外貌和服饰不变，生成背景画面，修复人物角色的缺失或模糊部分。 {self.data['scripts'][scene]['描述']}")
+                        negative_prompt = "Blurry, misshapen, unnatural lighting, overlapping characters"
+
+                    # image2image填充背景
+                    self._generate_image2image(
+                        path_input_image=temp_path,
+                        prompt=background_prompt,
+                        negative_prompt=negative_prompt,
+                        path_output_image=out_path,
+                        api_url=api_url,
+                    )
+                    print(f"✅ 已生成多角色同屏画面: {out_path}")
+
+        finally:
+            print("关闭 image2image FastAPI 服务...\n")
+            try:
+                requests.post(f"http://{uvicorn_host}:{uvicorn_port}/shutdown", timeout=5)
+            except:
+                pass
+            fastapi_process.terminate()
+            try:
+                fastapi_process.wait(timeout=10)
+            except:
+                fastapi_process.kill()
+                
     # 生成每个场景背景的提示词, 用于text2image生成场景背景图
     def generate_scene_background_prompts(self):
         scripts=self.data.scripts
@@ -1208,18 +1582,16 @@ class DramaPipeline:
 
                 # 转化image为统一的长宽
                 resized_img = self.resize_keep_aspect(image=image, save_path=path_output)
-                # role["path_role"] = path_role
                 results.append(path_output)
-                # display(resized_img)
                 del image, resized_img
                 gc.collect()
                 torch.cuda.empty_cache()
             for scene, value in self.data.scripts.items():
                 print(scene)
-                path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_opening_background.png")
+                path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_background.png")
                 # 如果存在则跳过
                 if skip_if_exists and os.path.exists(path_output):
-                    print(f"{scene}_opening_background 已存在, 跳过生成。\n")
+                    print(f"{scene}_background 已存在, 跳过生成。\n")
                     continue
                 prompt = f'''
     High-definition picture quality. {value['background_prompt_en']}. {self.data.base_info.drama_style}.{self.data.base_info.culture_background}
@@ -1244,8 +1616,6 @@ class DramaPipeline:
                 # 转化image为统一的长宽
                 resized_img = self.resize_keep_aspect(image=image, save_path=path_output)
                 results.append(path_output)
-                # role["path_role"] = path_role
-                # display(resized_img)
                 del image, resized_img
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -1277,7 +1647,7 @@ class DramaPipeline:
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
         return results
@@ -1318,7 +1688,7 @@ class DramaPipeline:
         result = self.generate_response(messages)
         return result
 
-    def generate_scene_role_image(self, max_length=500, skip_if_exists=True):
+    def generate_scene_role_image(self, skip_if_exists=True):
         ''' 
         :param skip_if_exists: 是否跳过已有文件
         '''
@@ -1351,32 +1721,7 @@ class DramaPipeline:
         resp.raise_for_status()
         print(resp.json())
 
-        def _generate_role_image(path_input_image, prompt, negative_prompt, path_output_image):
-            """生成单个图像"""
-            init_image = Image.open(path_input_image)
-            image_b64 = self.pil_to_base64(init_image)
-            prompt = ' '.join(prompt.split()[:max_length])
-            negative_prompt = ' '.join(negative_prompt.split()[:max_length])
-            print(f"正面提示词: {prompt}")
-            print(f"负面提示词: {negative_prompt}")
-            # 调用 FastAPI 生成图像
-            image = self.image2image_via_api(
-                prompt=prompt, 
-                image_base64=image_b64,
-                negative_prompt=negative_prompt,
-                width=self.data.base_info.width,
-                height=self.data.base_info.height,
-                api_url=api_url,
-                steps=30
-            )
-            # 转化image为统一的长宽
-            resized_img = self.resize_keep_aspect(image=image, save_path=path_output_image)
-            # display(resized_img)
-            del image, resized_img
-            gc.collect()
-            torch.cuda.empty_cache()
         try:
-            # if scene_roles_id is None:
             for scene, value in self.data.scripts.items():
                 print(scene)
                 for scene_role in value['scene_roles']:
@@ -1396,11 +1741,12 @@ class DramaPipeline:
                     candidate_scores = []
                     for i in range(2):
                         path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_role_{role_id}_{i}.png")
-                        _generate_role_image(
+                        self._generate_image2image(
                             path_input_image=path_input,
                             prompt=prompt,
                             negative_prompt=negative_prompt,
                             path_output_image=path_output,
+                            api_url=api_url,
                             )
                         score, comps = self.score_character(path_output, prompt)
                         candidate_scores.append((score, path_output))
@@ -1412,29 +1758,6 @@ class DramaPipeline:
                     results.append(final_path)
                     shutil.copy(best_path, final_path)
                     print(f"{scene}_role_{role_id} 最佳图: {os.path.basename(best_path)} (score={best_score}) 已保存为 {final_path}")
-
-            # else:
-            #     for x in scene_roles_id:
-            #         scene, role_id = x.split('_role_')
-            #         scene_role = next(
-            #             r for r in self.data.scripts[scene]['scene_roles']
-            #             if str(r['role_id']) == str(role_id)
-            #         )
-            #         role_id = scene_role['role_id']
-            #         # 加载初始角色形象图
-            #         path_input = os.path.join(self.data.base_info.OUTPUT_DIR, f"{role_id}.png")
-            #         prompt = f'''High-definition picture quality.Keep the character's appearance and clothing unchanged. 
-            #     {scene_role['prompt_en']}. {self.data.scripts[scene]['background_prompt_en']}'''
-            #         negative_prompt = scene_role["negative_prompt_en"]
-            #         print(f"生成 {scene}_role_{role_id}: {scene_role['name']} 的形象")
-            #         path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_role_{role_id}.png")
-            #         _generate_role_image(
-            #             path_input_image=path_input,
-            #             prompt=prompt,
-            #             negative_prompt=negative_prompt,
-            #             path_output_image=path_output,
-            #         )
-            #         results.append(path_output)
         finally:
             print("请求 FastAPI 自我关闭, 释放显存...\n")
             # 等待所有请求完成
@@ -1462,7 +1785,7 @@ class DramaPipeline:
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
         return results
@@ -1472,7 +1795,7 @@ class DramaPipeline:
         scripts = self.data.scripts
         # 提取所有风景节点的 chatID
         scenery_nodes = {
-            scene: {chat["chatID"]: chat for chat in value["shots"] if chat["type"] == "scenery"}
+            scene: {chat["chatID"]: chat for chat in value["shots"] if chat.get('type', None) == "scenery"}
             for scene, value in scripts.items()
         }
         messages = [
@@ -1512,8 +1835,32 @@ class DramaPipeline:
         ]
         result = self.generate_response(messages)
         return result
-        
-    def generate_scene_scenery_image(self, max_length=500, skip_if_exists=True):
+    
+    def _generate_image2image(self, path_input_image, prompt, negative_prompt, path_output_image, api_url="http://127.0.0.1:5111/image2image", max_length=500):
+        """生成单个图像"""
+        init_image = Image.open(path_input_image)
+        image_b64 = self.pil_to_base64(init_image)
+        prompt = ' '.join(prompt.split()[:max_length])
+        negative_prompt = ' '.join(negative_prompt.split()[:max_length])
+        print(f"正面提示词: {prompt}")
+        print(f"负面提示词: {negative_prompt}")
+        # 调用 FastAPI 生成图像
+        image = self.image2image_via_api(
+            prompt=prompt, 
+            image_base64=image_b64,
+            negative_prompt=negative_prompt,
+            width=self.data.base_info.width,
+            height=self.data.base_info.height,
+            api_url=api_url,
+            steps=30,
+        )
+        # 转化image为统一的长宽
+        resized_img = self.resize_keep_aspect(image=image, save_path=path_output_image)
+        del image, resized_img
+        gc.collect()
+        torch.cuda.empty_cache()
+    
+    def generate_scene_scenery_image(self, skip_if_exists=True):
         ''' 
         :param skip_if_exists: 是否跳过已经存在的图像
         '''
@@ -1546,38 +1893,12 @@ class DramaPipeline:
         resp.raise_for_status()
         print(resp.json())
 
-        def _generate_role_image(path_input_image, prompt, negative_prompt, path_output_image):
-            """生成单个图像"""
-            init_image = Image.open(path_input_image)
-            image_b64 = self.pil_to_base64(init_image)
-            prompt = ' '.join(prompt.split()[:max_length])
-            negative_prompt = ' '.join(negative_prompt.split()[:max_length])
-            print(f"正面提示词: {prompt}")
-            print(f"负面提示词: {negative_prompt}")
-            # 调用 FastAPI 生成图像
-            image = self.image2image_via_api(
-                prompt=prompt, 
-                image_base64=image_b64,
-                negative_prompt=negative_prompt,
-                width=self.data.base_info.width,
-                height=self.data.base_info.height,
-                api_url=api_url,
-                steps=30,
-            )
-            # display(image)
-            # 转化image为统一的长宽
-            resized_img = self.resize_keep_aspect(image=image, save_path=path_output_image)
-            # display(resized_img)
-            del image, resized_img
-            gc.collect()
-            torch.cuda.empty_cache()
         try:
-            # if chatIDs is None:
             for scene, value in self.data.scripts.items():
                 print(scene)
                 shots = value['shots']
                 for idx, chat_info in enumerate(shots):
-                    if str(chat_info['type']) == "scenery":
+                    if chat_info.get('type', None) == "scenery":
                         chatID = chat_info['chatID']
                         path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}_scenery.png")
                         # 如果已经存在, 则跳过
@@ -1585,7 +1906,7 @@ class DramaPipeline:
                             print(f"{chatID}_scenery已存在, 跳过生成。\n")
                             continue
 
-                        path_input = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_opening_background.png")
+                        path_input = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_background.png")
                         # 判断是不是第一个节点
                         if idx == 0:
                             # 用开场背景图
@@ -1596,40 +1917,14 @@ class DramaPipeline:
                             negative_prompt = f'''
 Blurry, low quality, person, human, character, character shadows, figure, silhouette, man, woman, people, portrait, face, body, text, watermark, logo. {chat_info['negative_prompt_en']}
     '''
-                            _generate_role_image(
+                            self._generate_image2image(
                                 path_input_image=path_input,
                                 prompt=prompt,
                                 negative_prompt=negative_prompt,
                                 path_output_image=path_output,
+                                api_url=api_url,
                             )
                             results.append(path_output)
-
-    #         else:
-    #             for chatID in chatIDs:
-    #                 scene, _ = chatID.split('_')
-    #                 shots = self.data.scripts[scene]['shots']
-    #                 chat_info = [c for c in shots if (c['type']=='scenery' and c['chatID']==chatID)]
-    #                 chat_info = chat_info[0] if chat_info else None
-    #                 if chat_info is not None:
-    #                     # 找到当前索引
-    #                     idx = shots.index(chat_info)
-    #                     path_input = os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_opening_background.png")
-    #                     path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}_scenery.png")
-    #                     if idx == 0 or all(s['type'] != 'scenery' for s in shots[:idx]):
-    #                         shutil.copy(path_input, path_output)
-    #                         results.append(path_output)
-    #                     else:
-    #                         prompt = f"High-definition landscape. {chat_info['prompt_en']}"
-    #                         negative_prompt = f'''
-    # Blurry, low quality, person, human, character, character shadows, figure, silhouette, man, woman, people, portrait, face, body, text, watermark, logo. {chat_info['negative_prompt_en']}
-    #     '''
-    #                         _generate_role_image(
-    #                             path_input_image=path_input,
-    #                             prompt=prompt,
-    #                             negative_prompt=negative_prompt,
-    #                             path_output_image=path_output,
-    #                         )
-    #                         results.append(path_output)
 
         finally:
             print("请求 FastAPI 自我关闭, 释放显存...\n")
@@ -1658,16 +1953,16 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
         return results
+    
     # 5. 生成视频
     def generate_videos(self, skip_if_exists=True):
         print("[INFO] 正在生成视频...\n")
         self.data = self.data.load_json()
         results = []
-        print_text = ''
         for text in ['opening', 'ending']:
             path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{text}_video.mp4")
             results.append(path_output)
@@ -1679,16 +1974,15 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
         # 如果results中文件都已存在, 则直接跳过
         if all(os.path.exists(path) for path in results) and skip_if_exists:
             print("所有视频已存在, 跳过生成步骤。\n")
-            return results, print_text
+            return results
         # 生成片头片尾视频
         path_opening_scene_video =self.generate_opening_scene_video(skip_if_exists=skip_if_exists)
-        # results = path_opening_scene_video
         # 生成对话视频
         # 生成multitalk的输入 JSON 文件
         for scene, value in self.data.scripts.items():
             print(scene)
             for role in value['shots']:
-                if role['type'] == 'dialogue':
+                if role.get('type', None) == 'dialogue':
                     role_id = role['role_id']
                     chatID = role['chatID']
                     path_role = os.path.abspath(os.path.join(self.data.base_info.OUTPUT_DIR, f"{scene}_role_{role_id}.png"))
@@ -1704,17 +1998,40 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                     json_path = os.path.abspath(os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.json"))
                     with open(json_path, 'w') as f:
                         json.dump(json_data, f, ensure_ascii=False, indent=4)
-                    print(f"已保存 JSON 文件: {json_path}")
-                    
+                    print(f"已保存单角色对话 JSON 文件: {json_path}")
+                # 如果role.keys()中包含left,center,right中的任意一个, 则生成多角色对话视频
+                elif any(role.get(key, None) for key in ['left', 'center', 'right']):
+                    chatID = role['chatID']
+                    # 生多角色对话视频
+                    path_role = os.path.abspath(os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}_multi.png"))
+                    json_data = {
+                        "prompt": '',
+                        "cond_image": path_role,
+                        "audio_type": "add",
+                        "cond_audio": {},
+                        "bbox": {}
+                    }
+                    # 遍历left,center,right
+                    index_person = 1
+                    for position in ['left', 'center', 'right']:
+                        if role.get(position, None):
+                            role_id = role[position]['role_id']
+                            json_data['prompt'] += f"The {position} role, {DramaData.translate_text(role[position]['表情和动作'])}."
+                            json_data['cond_audio'][f'person{index_person}'] = role[position]['path_audio']
+                            json_data['bbox'][f'person{index_person}'] = role[position]['bbox']
+                            index_person += 1
+                    # 保存为 JSON 文件
+                    json_path = os.path.abspath(os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.json"))
+                    with open(json_path, 'w') as f:
+                        json.dump(json_data, f, ensure_ascii=False, indent=4)
+                    print(f"已保存多角色对话 JSON 文件: {json_path}")
         path_chat_videos=self.generate_chat_videos(skip_if_exists=skip_if_exists)
-        # results += path_chat_videos
         path_scenery_videos=self.generate_scene_scenery_video(skip_if_exists=skip_if_exists)
-        # results += path_scenery_videos
         action_prompts = self.generate_action_prompts()
 
         for scene, value in self.data.scripts.items():
             for chat in value['shots']:
-                if chat['type'] == "action":
+                if chat.get('type', None) == "action":
                     # action 节点 prompt 使用 chatID
                     chat_id = chat['chatID']
                     chat['video_prompt'] = action_prompts[scene][chat_id]['正面提示词']
@@ -1722,11 +2039,11 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                     chat['video_prompt_en'] = DramaData.translate_text(chat['video_prompt'])
                     chat['video_negative_prompt_en'] = DramaData.translate_text(chat['video_negative_prompt'])
         path_action_videos=self.generate_scene_action_video(skip_if_exists=skip_if_exists)
-        # results += path_action_videos
+
         for scene, value in self.data.scripts.items():
             print(scene)
             for chat in value['shots']:
-                if chat['type'] == "action": 
+                if chat.get('type', None) == "action": 
                     chatID = chat['chatID']
                     path_action_video = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.mp4")
                     path_audio = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.wav")
@@ -1749,11 +2066,10 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                         try:
                             subprocess.run(cmd, check=True, capture_output=True, text=True)
                         except subprocess.CalledProcessError as e:
-                            print("❌ ffmpeg 执行失败")
+                            print("❎ ffmpeg 执行失败")
                             print("命令:", " ".join(cmd))
                             print("stderr:\n", e.stderr)
                             continue
-                        # subprocess.run(cmd, check=True)
                         # 覆盖保存
                         os.replace(tmp_output, path_action_video)
                         print(f"已合成音频到视频：{path_action_video}")
@@ -1762,8 +2078,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                         
         # 保存self.data到json文件
         self.data.save_json()
-        print_text += f"✅ 视频生成完成\n"
-        return results, print_text
+        return results
     
     # 生成片头片尾视频
     def generate_opening_scene_video(self, skip_if_exists=True, max_length=500):
@@ -1879,7 +2194,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
         return results
@@ -1888,7 +2203,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
         """调用 MultiTalk FastAPI 生成视频"""
         with requests.post(api_url, json=payload, stream=True) as resp:
             if resp.status_code != 200:
-                print(f"[ERROR] 请求失败: {resp.status_code}, {resp.text}")
+                print(f"❎ 请求失败: {resp.status_code}, {resp.text}")
                 return None
 
             print("[INFO] 开始流式接收日志 ...\n")
@@ -1898,31 +2213,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                         continue
                     print("[SERVER]", line)
             except Exception as e:
-                print(f"[ERROR] 流式接收中断: {e}")
-
-        # try:
-        #     response = requests.post(api_url, json=payload)
-        #     response.raise_for_status()
-        #     result = response.json()
-        #     cmd = result.get("cmd", None)
-        #     print("FastAPI执行命令: ", " ".join(cmd))
-        #     video_file = result.get("video_file", None)
-        #     if video_file and video_file != "未返回文件":
-        #         print("✅ 成功生成视频:", video_file)
-        #     else:
-        #         print("未生成文件:", payload.get("save_file", "unknown"))
-        #         print(result)
-        #     return video_file
-        # except requests.HTTPError as e:
-        #     print("❌ FastAPI 返回 HTTP 错误:", e)
-        #     try:
-        #         # 尝试打印详细响应内容
-        #         print("返回内容:", response.text)
-        #     except Exception:
-        #         pass
-        # except Exception as e:
-        #     print("❌ 请求异常:", e)
-        # return None
+                print(f"❎ 流式接收中断: {e}")
 
     def generate_chat_videos(self, skip_if_exists=True):
         """批量生成对话视频"""
@@ -1954,7 +2245,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
             for scene, value in self.data.scripts.items():
                 print(f"{scene}")
                 for role in value['shots']:
-                    if role['type'] == 'dialogue':
+                    if (role.get('type', None) == 'dialogue') or (any(role.get(key, None) for key in ['left', 'center', 'right'])):
                         chatID = role['chatID']
                         path_output = os.path.abspath(os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.mp4"))
                         # 如果文件已存在, 则跳过
@@ -1979,7 +2270,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                             "sample_audio_guide_scale": 2.0,
                             "sample_steps": 8,
                             "mode": "streaming",
-                            "num_persistent_param_in_dit": 1,
+                            "num_persistent_param_in_dit": 0,
                             "save_file": save_file,
                             "sample_shift": 2,
                             # "quant_dir": quant_dir,
@@ -2006,7 +2297,6 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 requests.post(f"http://{uvicorn_host}:{uvicorn_port}/shutdown", timeout=5)
             except Exception:
                 pass
-
             try:
                 fastapi_process.wait(timeout=10)
                 print("✅ FastAPI 已关闭")
@@ -2058,7 +2348,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
             for scene, value in self.data.scripts.items():
                 print(scene)
                 for chat_info in value['shots']:
-                    if chat_info['type'] == "scenery":
+                    if chat_info.get('type', None) == "scenery":
                         chatID = chat_info['chatID']
                         path_output = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.mp4")
                         # 如果文件已存在, 跳过  
@@ -2123,7 +2413,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
         return results
@@ -2134,7 +2424,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
         scripts = self.data.scripts
         # 提取所有风景节点的 chatID
         action_nodes = {
-            scene: {chat["chatID"]: chat for chat in value["shots"] if chat["type"] == "action"}
+            scene: {chat["chatID"]: chat for chat in value["shots"] if chat.get('type', None) == "action"}
             for scene, value in scripts.items()
         }
         messages = [
@@ -2195,7 +2485,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
             for scene, value in self.data.scripts.items():
                 print(scene)
                 for chat_info in value['shots']:
-                    if chat_info['type'] != "action":
+                    if chat_info.get('type', None) != "action":
                         continue
                     chatID = chat_info['chatID']
                     role_id = chat_info['role_id']
@@ -2265,7 +2555,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 try:
                     fastapi_process.wait(timeout=5)
                 except Exception:
-                    print("❌ FastAPI 无法正常终止, 执行强制 kill")
+                    print("❎ FastAPI 无法正常终止, 执行强制 kill")
                     fastapi_process.kill()
                 print("FastAPI 已被强制关闭")
         return results
@@ -2275,7 +2565,6 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
         print('[INFO] 正在拼接视频...')
         self.data = self.data.load_json()
         results = []
-        print_text = ''
         # 添加标题文字到开场视频、结尾视频
         path_opening_video = os.path.join(self.data.base_info.OUTPUT_DIR, "opening_video.mp4")
         path_opening_video_with_title = os.path.join(self.data.base_info.OUTPUT_DIR, "opening_video_with_title.mp4")
@@ -2287,7 +2576,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 path_output=path_opening_video_with_title
             )
         else:
-            print(f"⚠️ 缺少开场视频: {path_opening_video}")
+            print(f"⚠ 缺少开场视频: {path_opening_video}")
 
         path_ending_video = os.path.join(self.data.base_info.OUTPUT_DIR, "ending_video.mp4")
         path_ending_video_with_title = os.path.join(self.data.base_info.OUTPUT_DIR, "ending_video_with_title.mp4")
@@ -2318,14 +2607,32 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
             print(f"处理场景: {scene}")
             for role in value.get('shots', []):
                 chatID = role['chatID']
-                subtitle = role.get('对话', None)
+
+                # 修复字幕逻辑
+                subtitle = None
+                if '对话' in role:
+                    subtitle = role['对话']
+                elif any(role.get(pos) for pos in ['left', 'center', 'right']):
+                    subtitle_parts = []
+                    for pos in ['left', 'center', 'right']:
+                        sub_role = role.get(pos)
+                        if sub_role and sub_role.get('对话'):
+                            # 带角色名更自然
+                            name = sub_role.get('name', pos)
+                            subtitle_parts.append(f"{name}: {sub_role['对话']}\n")
+                    subtitle = "\n".join(subtitle_parts) if subtitle_parts else None
+
                 path_chat_video = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}.mp4")
                 final_chat_video = os.path.join(self.data.base_info.OUTPUT_DIR, f"{chatID}_complete.mp4")
+
                 if os.path.exists(path_chat_video):
                     self.resize_with_letterbox_ffmpeg(
-                        path_chat_video, final_chat_video,
-                        TARGET_SIZE, TARGET_FPS,
-                        subtitle=subtitle, fontsize=36
+                        path_chat_video,
+                        final_chat_video,
+                        TARGET_SIZE,
+                        TARGET_FPS,
+                        subtitle=subtitle,
+                        fontsize=36
                     )
                     all_clips.append(final_chat_video)
                 else:
@@ -2347,11 +2654,9 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
             print(f"✅ 所有视频已拼接完成！输出文件: {output_path}")
             self.output_video_path = output_path
             results.append(output_path)
-            print_text = f"✅ 所有视频已拼接完成！输出文件: {output_path}"
         else:
-            print("❌ 未找到可拼接的视频文件！")
-            print_text = "❌ 未找到可拼接的视频文件！"
-        return results, print_text
+            print("❎ 未找到可拼接的视频文件！")
+        return results
                     
     @staticmethod
     def sharpness_score(image_path):
@@ -2491,7 +2796,7 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
         return result_image
 
     @staticmethod
-    def resize_keep_aspect(image: Image.Image, save_path: str, target_size=(720, 1280), mode="scale", fill_color=(0,0,0)):
+    def resize_keep_aspect(image: Image.Image, save_path: str, target_size=(720, 1280), mode="scale", fill_color=(0,0,0), pad_shift_ratio=0.0):
         """
         将图片转换为指定分辨率的三种模式:
         
@@ -2524,7 +2829,9 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 new_img = Image.new("RGB", target_size, fill_color)
 
             paste_x = (target_w - image.width) // 2
-            paste_y = (target_h - image.height) // 2
+            offset_y = int((target_h - image.height) * pad_shift_ratio)
+            paste_y = (target_h - image.height) // 2 + offset_y
+            paste_y = min(max(paste_y, 0), target_h - image.height)  # 防止越界
             new_img.paste(image, (paste_x, paste_y))
             image = new_img
             print(f"[pad] 缩放并补边为 {target_w}x{target_h}")
@@ -2803,6 +3110,10 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
         if subtitle:
             subtitle = subtitle.replace("'", "’")  # 替换单引号避免冲突
             wrapped = self.auto_wrap_subtitle(subtitle, target_w, fontsize)
+            line_count = wrapped.count("\n") + 1
+            line_height = fontsize * 1.5
+            total_text_height = line_count * line_height
+            bottom_margin = fontsize * 0.5
             fontfile = self.get_fontfile()
             if fontfile:
                 font_arg = f":fontfile={fontfile}"
@@ -2810,24 +3121,16 @@ Blurry, low quality, person, human, character, character shadows, figure, silhou
                 # If nothing found, skip drawtext to avoid ffmpeg failure
                 print("Warning: no usable font found for drawtext; skipping subtitles. Install fonts (e.g. fonts-dejavu) or set fontfile.")
                 font_arg = None
-
             if font_arg:
-                if "\n" in wrapped:
-                    tf = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".txt")
-                    tf.write(wrapped)
-                    tf.flush()
-                    tf.close()
-                    tf_path = tf.name
-                    vf_filters.append(
-                        f"drawtext=textfile={tf_path}:reload=1:fontfile={fontfile}:fontcolor=white:fontsize={fontsize}:"
-                        f"borderw=2:x=(w-text_w)/2:y=h-140:line_spacing=10:box=1:boxcolor=black@0.4:boxborderw=5"
-                    )
-                else:
-                    wrapped_escaped = wrapped.replace("\\", "\\\\").replace("\n", "\\n").replace(":", "\\:")
-                    vf_filters.append(
-                        f"drawtext=text='{wrapped_escaped}':fontfile={fontfile}:fontcolor=white:fontsize={fontsize}:"
-                        f"borderw=2:x=(w-text_w)/2:y=h-140:line_spacing=10:box=1:boxcolor=black@0.4:boxborderw=5"
-                    )
+                tf = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", suffix=".txt")
+                tf.write(wrapped)
+                tf.flush()
+                tf.close()
+                tf_path = tf.name
+                vf_filters.append(
+                    f"drawtext=textfile={tf_path}:reload=1:fontfile={fontfile}:fontcolor=white:fontsize={fontsize}:"
+                    f"borderw=2:x=(w-text_w)/2:y=h-{total_text_height-bottom_margin}:line_spacing=10:box=1:boxcolor=black@0.4:boxborderw=5"
+                )
 
         # 检查输入是否有音频
         has_audio = self._has_audio_stream(input_path)

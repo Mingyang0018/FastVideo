@@ -64,6 +64,8 @@ with st.sidebar:
 
     image2video_model = st.selectbox("image-to-video 模型", ["Wan-AI/Wan2.2-TI2V-5B-Diffusers"], index=0)
     image2video_model = "./" + image2video_model.split("/")[-1]
+    # 添加双人同屏选项
+    multi_roles = st.checkbox("开启双人同屏", value=False)
     # 添加代理设置部分
     proxy_enabled = st.checkbox("开启代理", value=False)  # 布尔值控件，用于开启或关闭代理
     proxy_port = None
@@ -137,6 +139,7 @@ def check_and_init(force_refresh=True, load_data=True, allow_partial_load=False)
         image2video_model=image2video_model,
         theme=theme,
         time_limit=time_limit,
+        multi_roles=multi_roles,
         use_proxy=proxy_enabled,
         proxy_port=proxy_port
     )
@@ -155,7 +158,6 @@ def check_and_init(force_refresh=True, load_data=True, allow_partial_load=False)
 # 定义 results，集中管理每个步骤的文件路径
 def get_results():
     base_info, drama_data, _=check_and_init(force_refresh=True, load_data=True, allow_partial_load=True)
-    # st.write(drama_data.roles)
     if drama_data is None:
         return {
             "script": [],
@@ -182,7 +184,7 @@ def get_results():
         for key, value in drama_data.scripts.items():
             for index, plot in enumerate(value['shots']):
                 chatID = plot['chatID']
-                if plot["type"] != "scenery":
+                if plot.get('type', None) != "scenery":
                     path_audio = os.path.join(drama_data.base_info.OUTPUT_DIR, f'{chatID}.wav')
                     results['voices'].append(path_audio)
     # roles
@@ -204,19 +206,27 @@ def get_results():
         results['scenes'].append(path_output)
     results['scenes'] += [(os.path.join(drama_data.base_info.OUTPUT_DIR, "opening_scene.png"))]
     for scene, value in drama_data.scripts.items():
-            path_output = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{scene}_opening_background.png")
+            path_output = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{scene}_background.png")
             results['scenes'].append(path_output)
     for scene, value in drama_data.scripts.items():
         for scene_role in value['scene_roles']:
-            role_id = scene_role['role_id']
-            final_path = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{scene}_role_{role_id}.png")
-            results['scenes'].append(final_path)
+            if scene_role.get('role_id', None) is not None:
+                role_id = scene_role['role_id']
+                final_path = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{scene}_role_{role_id}.png")
+                results['scenes'].append(final_path)
+        # 判断是否有多角色同屏节点，left, center, right
+        for plot in value['shots']:
+            if multi_roles and any(k in plot for k in ["left", "center", "right"]):
+                chatID = plot["chatID"]
+                out_path = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{chatID}_multi.png")
+                results['scenes'].append(out_path)
     for scene, value in drama_data.scripts.items():
         for idx, chat_info in enumerate(value['shots']):
-            if str(chat_info['type']) == "scenery":
+            if str(chat_info.get('type', None)) == "scenery":
                 chatID = chat_info['chatID']
                 path_output = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{chatID}_scenery.png")
                 results['scenes'].append(path_output)
+            
     # videos
     for text in ['opening', 'ending']:
         path_output = os.path.join(drama_data.base_info.OUTPUT_DIR, f"{text}_video.mp4")
@@ -250,7 +260,7 @@ def confirm_delete(item_name, session_state_key=None, extra_remove_keys=None):
                 st.session_state["confirm_action"] = f"confirm_del_{item_name}"
                 
         with col2:
-            if st.button("❌ 否", key=f"cancel_del_{item_name}"):
+            if st.button("❎ 否", key=f"cancel_del_{item_name}"):
                 st.session_state["confirm_action"] = None
                 placeholder.empty()
 
@@ -334,7 +344,7 @@ if st.session_state["confirm_action"] == "generate_all":
             if st.button("✅ 补充生成(跳过已生成的部分)", key="confirm_generate_all_skip"):
                 st.session_state["confirm_action"] = "confirm_generate_all_skip"
         with col_c3:
-            if st.button("❌ 取消", key="cancel_generate_all"):
+            if st.button("❎ 取消", key="cancel_generate_all"):
                 st.session_state["confirm_action"] = None
                 placeholder.empty()
 if st.session_state["confirm_action"] == "confirm_generate_all_overwrite":
@@ -374,7 +384,7 @@ with col1:
                 show_log()
                 script_path = path_output['script'][0]
                 path_drama_data = path_output['script'][1]
-                results, print_text = drama_pipeline.generate_script_and_shot(skip_if_exists=True)
+                drama_pipeline.generate_script_and_shot(skip_if_exists=True)
                 with open(script_path, "r", encoding="utf-8") as f:
                     st.session_state["script_text"] = f.read()
                 time.sleep(1)
@@ -401,8 +411,8 @@ with col2:
             # _, _, drama_pipeline = check_and_init()
             if drama_pipeline:
                 show_log()
-                results1, print_text1 = drama_pipeline.generate_voices_sync(skip_if_exists=True)
-                results2, print_text2 = drama_pipeline.generate_roles(skip_if_exists=True)
+                drama_pipeline.generate_voices_sync(skip_if_exists=True)
+                drama_pipeline.generate_roles(skip_if_exists=True)
                 st.session_state["roles_generated"] = True
                 st.session_state["roles_generated"] = True
                 time.sleep(1)
@@ -419,12 +429,11 @@ with col2:
         file_exists = role.get('exists', False)
         st.markdown(f"**{role_name}**")
         col_img, col_candidates = st.columns([9, 3.5])
-        # with col_name:
         with col_img:
             if file_exists and os.path.exists(role_path):
                 col_left, col_center, col_right = st.columns([4, 3, 3])
                 with col_center:
-                    if st.button("❌", key=f"del_{role_name}", help=f"删除 {role_name} 的角色图片"):
+                    if st.button("❎", key=f"del_{role_name}", help=f"删除 {role_name} 的角色图片"):
                         try:
                             os.remove(role_path)
                             st.rerun()
@@ -489,13 +498,11 @@ with col3:
                 st.rerun()
     if del3_button:
         st.session_state["confirm_action"] = "delete_scenes"
-        # st.text(path_output['scenes'])
     confirm_delete("scenes", session_state_key="scenes_generated")
 
     # 把场景图片按场景名归类
     scene_dict = defaultdict(list)
     for scene_path in path_output['scenes']:
-        # if os.path.exists(scene_path):
         base_name = os.path.splitext(os.path.basename(scene_path))[0]  # e.g. scene1_xxx
         # 提取场景名：取下划线前缀
         scene_key = base_name.split("_")[0]  
@@ -513,7 +520,7 @@ with col3:
                     # 删除按钮放在图片上方
                     btn_col = st.columns([3, 3, 3])[1]  # 中间位置
                     with btn_col:
-                        if st.button("❌", key=f"del_scene_{scene_name}_{i}", help=f"删除 {os.path.basename(scene_path)}"):
+                        if st.button("❎", key=f"del_scene_{scene_name}_{i}", help=f"删除 {os.path.basename(scene_path)}"):
                             try:
                                 os.remove(scene_path)
                                 st.rerun()
@@ -558,8 +565,6 @@ with col4:
             if drama_pipeline:
                 show_log()
                 drama_pipeline.generate_videos(skip_if_exists=True)
-                # drama_pipeline.concatenate_videos()
-                # st.session_state["video_path"] = drama_pipeline.output_video_path
                 time.sleep(1)
                 st.rerun()
 
@@ -576,7 +581,7 @@ with col4:
                 # st.markdown(f"**{video_name}**")
                 col_0, col_1, col_2 = st.columns([4, 2, 4])
                 with col_1:
-                    if st.button("❌", key=f"del_{video_name}", help=f"删除 {video_name} 视频"):
+                    if st.button("❎", key=f"del_{video_name}", help=f"删除 {video_name} 视频"):
                         try:
                             os.remove(video_path)
                             st.rerun()
@@ -627,7 +632,6 @@ with col5:
         else:
             if drama_pipeline:
                 show_log()
-                # drama_pipeline.generate_videos(skip_if_exists=True)
                 drama_pipeline.concatenate_videos()
                 st.session_state["drama_path"] = drama_pipeline.output_video_path
                 time.sleep(1)

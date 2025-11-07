@@ -41,7 +41,7 @@ def load_model(req: ModelRequest):
         cuda_count = torch.cuda.device_count()
         # No GPU -> CPU
         if cuda_count == 0:
-            print("ℹ️ 未检测到 GPU，使用 CPU 加载模型")
+            print("未检测到 GPU，使用 CPU 加载模型")
             pipe = DiffusionPipeline.from_pretrained(
                 req.model_id,
                 local_files_only=True,
@@ -50,7 +50,7 @@ def load_model(req: ModelRequest):
 
         # Single GPU -> load fp16 to single card
         elif cuda_count == 1:
-            print("ℹ️ 检测到 1 个 GPU，使用单卡（cuda:0），采用 float16 减少显存占用")
+            print("检测到 1 个 GPU，使用单卡（cuda:0），采用 float16 减少显存占用")
             pipe = DiffusionPipeline.from_pretrained(
                 req.model_id,
                 # torch_dtype=torch.float16,
@@ -62,7 +62,7 @@ def load_model(req: ModelRequest):
 
         # Multi GPU -> try to shard/parallelize across cards
         else:
-            print(f"ℹ️ 检测到 {cuda_count} 个 GPU，尝试将模型分配到多卡")
+            print(f"检测到 {cuda_count} 个 GPU，尝试将模型分配到多卡")
             # prefer device_map="auto" when available, fallback to "balanced"
             tried_auto = False
             try:
@@ -74,7 +74,7 @@ def load_model(req: ModelRequest):
                     local_files_only=True,
                 )
                 tried_auto = True
-                print("ℹ️ 使用 device_map='auto' 自动分配到多卡")
+                print("使用 device_map='auto' 自动分配到多卡")
             except Exception:
                 print("⚠️ device_map='auto' 不可用，退回 device_map='balanced'")
                 pipe = DiffusionPipeline.from_pretrained(
@@ -109,59 +109,9 @@ def load_model(req: ModelRequest):
         return {"status": "ok", "model_id": req.model_id}
     except Exception as e:
         import traceback
-        print("❌ 模型加载失败:", e)
+        print("❎ 模型加载失败:", e)
         traceback.print_exc()
         return {"status": "error", "message": str(e)}
-
-# @app.post("/load_model")
-# def load_model(req: ModelRequest):
-#     global pipe
-#     if pipe is not None:
-#         del pipe
-#         gc.collect()
-#         torch.cuda.empty_cache()
-#         print("♻️ 旧模型已卸载")
-
-#     print(f"🚀 正在加载模型: {req.model_id}")
-#     try:
-#         # 根据系统 GPU 数量自动选择设备策略：
-#         # - 0 GPU: 使用 CPU
-#         # - 1 GPU: 将整个 pipeline 放到单个 GPU（精度使用 float16 以节省显存）
-#         # - 多 GPU: 使用 device_map="balanced" 让 accelerate/transformers 在多卡上分配
-#         cuda_count = torch.cuda.device_count()
-#         if cuda_count == 0:
-#             print("ℹ️ 未检测到 GPU，使用 CPU 加载模型")
-#             pipe = DiffusionPipeline.from_pretrained(
-#                 req.model_id,
-#                 local_files_only=True,
-#             )
-#             pipe.to("cpu")
-#         elif cuda_count == 1:
-#             print("ℹ️ 检测到 1 个 GPU，使用单卡（cuda:0）")
-#             pipe = DiffusionPipeline.from_pretrained(
-#                 req.model_id,
-#                 # torch_dtype=torch.float16,
-#                 local_files_only=True,
-#             )
-#             pipe.to("cuda")
-#         else:
-#             print(f"ℹ️ 检测到 {cuda_count} 个 GPU，使用 device_map='balanced' 分配到多卡")
-#             pipe = DiffusionPipeline.from_pretrained(
-#                 req.model_id,
-#                 device_map="balanced",
-#                 # torch_dtype=torch.float16,
-#                 local_files_only=True,
-#             )
-#             pipe.parallelize()
-
-#         pipe.enable_attention_slicing()
-#         print(f"✅ 模型 {req.model_id} 加载完成")
-#         return {"status": "ok", "model_id": req.model_id}
-#     except Exception as e:
-#         import traceback
-#         print("❌ 模型加载失败:", e)
-#         traceback.print_exc()
-#         return {"status": "error", "message": str(e)}
 
 @app.post("/image2image")
 def image2image(req: T2IRequest):
