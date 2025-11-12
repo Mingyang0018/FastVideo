@@ -38,7 +38,7 @@ graph LR;
 
 <div align="center">
     <video width="40%" controls>
-        <source src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430.mp4" type="video/mp4">
+        <source src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251110113328_new.mp4" type="video/mp4">
         Your browser does not support the video tag.
     </video>
     <video width="40%" controls>
