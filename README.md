@@ -42,7 +42,7 @@ graph LR;
         Your browser does not support the video tag.
     </video>
     <video width="40%" controls>
-        <source src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251006202718.mp4" type="video/mp4">
+        <source src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430_new.mp4" type="video/mp4">
         Your browser does not support the video tag.
     </video>
 </div>
@@ -107,13 +107,4 @@ streamlit run streamlit_app.py
 # 参考
 
 - MultiTalk: https://github.com/MeiGen-AI/MultiTalk
-- Huggingface: https://huggingface.co `<td>`
-
-`<video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20250924171430.mp4" width="450" controls loop>`
-
-`</video>`
-
-`</td>`
-      `<td>`
-          `<video src="https://github.com/Mingyang0018/FastVideo/releases/download/v1.0/FastVideo_20251006202718.mp4" width="450" controls loop></video>`
-      `</td>`
+- Huggingface: https://huggingface.co 
